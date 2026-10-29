@@ -261,6 +261,10 @@ class StrictSourceTests(unittest.TestCase):
         front = "---\n" + yaml.safe_dump(METADATA, sort_keys=False) + "---\n"
         self.assertTrue(any("blank line" in e for e in self.check(front_matter=front)))
 
+    def test_front_matter_rejects_extra_blank_separator(self):
+        front = "---\n" + yaml.safe_dump(METADATA, sort_keys=False) + "---\n\n\n"
+        self.assertTrue(any("exactly one blank line" in e for e in self.check(front_matter=front)))
+
     def test_yaml_quotes_colon_and_comment(self):
         title = "On Structure: Identity"
         front = "---\n" + yaml.safe_dump({**METADATA, "title": title}, sort_keys=False)

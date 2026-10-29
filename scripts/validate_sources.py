@@ -337,6 +337,8 @@ def validate_front_matter(relative: Path, source: str) -> tuple[dict | None, str
     body_line = close + 2
     if not body.startswith("\n"):
         errors.append(issue(relative, "require a blank line after closing front matter delimiter", close + 1))
+    elif body.startswith("\n\n"):
+        errors.append(issue(relative, "require exactly one blank line after closing front matter delimiter", close + 1))
     if not body.strip():
         errors.append(issue(relative, "manuscript body cannot be empty"))
 
