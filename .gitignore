@@ -4,3 +4,9 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Local build and test output
+__pycache__/
+*.pyc
+.pytest_cache/
+dist/

@@ -25,3 +25,7 @@ Copyright © 2026 nashspence. **All rights reserved** unless a particular work o
 ## Important distinction
 
 The repository can be used for public drafting, but public availability may still count as prior publication for a journal, contest, publisher, or other third party. Keep works private elsewhere if first-publication eligibility or confidentiality matters.
+
+## Source format and checks
+
+Use [FORMAT.md](FORMAT.md) for the canonical Markdown, Unicode, math, and stable-section conventions. Pushes and pull requests run the [source validation workflow](.github/workflows/validate-source.yml), which checks every tracked Markdown file and tests HTML/MathML conversion. CI does not publish an official edition.

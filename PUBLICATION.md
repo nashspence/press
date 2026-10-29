@@ -52,3 +52,7 @@ Do not silently alter an official edition. Publish a new version for corrections
 ## Public visibility is not confidentiality
 
 Unreleased material in a public repository can be seen, copied, or archived. Journals, contests, and publishers may regard such material as previously published even if this imprint calls it a draft. Keep sensitive or first-publication-dependent work in a private workspace until you are ready to disclose it.
+
+## Source compliance
+
+Manuscript sources should follow [FORMAT.md](FORMAT.md) and pass the **Validate manuscript sources** check at the reviewed revision before being tagged for publication. This check is independent of the post-publication release checker, and does not itself authorize, block, or create an official edition. Requiring a passing check before merging needs branch protection or a repository ruleset.
