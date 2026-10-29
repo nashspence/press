@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Strict, offline, fail-closed validator for Press source format v1.
+"""Strict, offline, fail-closed validator for Press source format v2.
 
 Pandoc is a required dependency: parser warnings and HTML render warnings fail CI.
 Git tracks the allowed source set; a public branch must be protected separately.
@@ -17,6 +17,8 @@ import unicodedata
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
+from identifier_schema import WORK_IDS, check_identifier_map, identifier_error, validate_registrations
+
 FORMAT = "gfm+tex_math_dollars+raw_html+yaml_metadata_block"
 SOURCE_EXTENSIONS = {".md", ".markdown"}
 WORK_SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
@@ -26,7 +28,8 @@ FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 FOOTNOTE = re.compile(r"\[\^([a-z0-9]+(?:-[a-z0-9]+)*)\]")
 FOOTNOTE_DEF = re.compile(r"^\[\^([a-z0-9]+(?:-[a-z0-9]+)*)\]:[ \t]+")
 RIGHTS = {"all-rights-reserved", "CC-BY-4.0", "CC-BY-ND-4.0", "CC-BY-NC-ND-4.0", "CC0-1.0"}
-META_KEYS = {"schema", "slug", "title", "author", "language", "rights", "status"}
+META_REQUIRED = {"schema", "slug", "title", "author", "language", "rights", "status"}
+META_OPTIONAL = {"author_orcid", "identifiers"}
 LANGUAGE = re.compile(r"[a-z]{2,3}(?:-[A-Z]{2})?\Z")
 
 
@@ -318,10 +321,11 @@ def render_html(path: Path, relative: Path, expected_math: int, manuscript: bool
 
 
 def validate_front_matter(relative: Path, source: str) -> tuple[dict | None, str, int, list[str]]:
-    """Read a single flat YAML metadata mapping followed by Markdown body.
+    """Parse a restricted front matter schema: text fields plus one identifiers map.
 
-    Restriction to single-line, string-valued keys prevents YAML features from
-    creating meaning invisible in the manuscript or the Pandoc interpretation.
+    The sole allowed nested mapping has a fixed namespace, two-space indent,
+    string values, no aliases/merge keys/custom tags/flow syntax. Pandoc parity
+    is independently verified after parsing.
     """
     errors: list[str] = []
     if not source.startswith("---\n"):
@@ -342,14 +346,19 @@ def validate_front_matter(relative: Path, source: str) -> tuple[dict | None, str
     if not body.strip():
         errors.append(issue(relative, "manuscript body cannot be empty"))
 
+    in_ids = False
     for number, line in enumerate(lines[1:close], start=2):
         raw_line = line.removesuffix("\n")
-        if not raw_line.strip() or raw_line.startswith("#"):
+        if not raw_line.strip() or raw_line.lstrip().startswith("#"):
             continue
-        # A deliberately restricted *subset* of YAML: one plain key/scalar per line.
-        # Quoted string values, Unicode and comments remain available to authors.
-        if not re.fullmatch(r"[a-z][a-z0-9_-]*:[ \t]+.+", raw_line):
-            errors.append(issue(relative, "front matter must use flat single-line key: string mappings", number))
+        if raw_line == "identifiers:":
+            in_ids = True
+        elif re.fullmatch(r"[a-z][a-z0-9_]*:[ \t]+.+", raw_line):
+            in_ids = False
+        elif in_ids and re.fullmatch(r"  [a-z][a-z0-9_]*:[ \t]+.+", raw_line):
+            continue
+        else:
+            errors.append(issue(relative, "front matter uses only top-level scalars and two-space identifiers entries", number))
 
     forbidden = (yaml.tokens.AnchorToken, yaml.tokens.AliasToken,
                  yaml.tokens.TagToken, yaml.tokens.DirectiveToken,
@@ -359,45 +368,67 @@ def validate_front_matter(relative: Path, source: str) -> tuple[dict | None, str
         tokens = list(yaml.scan(metadata_source))
         for token in tokens:
             if isinstance(token, forbidden):
-                errors.append(issue(relative, f"YAML aliases, anchors, tags, directives and collections are prohibited: {type(token).__name__}"))
+                errors.append(issue(relative, f"YAML aliases, anchors, tags, directives and flow/sequence collections prohibited: {type(token).__name__}"))
             if isinstance(token, yaml.tokens.ScalarToken) and token.style in ("|", ">"):
-                errors.append(issue(relative, "YAML folded and literal multiline scalars are prohibited"))
+                errors.append(issue(relative, "YAML folded and literal multiline scalars prohibited"))
         root = yaml.compose(metadata_source, Loader=yaml.SafeLoader)
     except yaml.YAMLError as exc:
         return None, body, body_line, errors + [issue(relative, f"invalid YAML front matter: {exc}")]
     if not isinstance(root, yaml.nodes.MappingNode):
         return None, body, body_line, errors + [issue(relative, "front matter must contain one mapping")]
-    data: dict[str, str] = {}
+
+    data: dict[str, object] = {}
     string_tag = "tag:yaml.org,2002:str"
+
+    def scalar(node, label: str):
+        if not isinstance(node, yaml.nodes.ScalarNode) or node.tag != string_tag:
+            errors.append(issue(relative, f"{label} must be a YAML string scalar; quote ambiguous booleans, dates, and numbers"))
+            return None
+        if "\n" in node.value or "\r" in node.value:
+            errors.append(issue(relative, f"{label} must be a single-line string"))
+        return node.value
+
     for key_node, value_node in root.value:
-        if not isinstance(key_node, yaml.nodes.ScalarNode) or key_node.tag != string_tag:
-            errors.append(issue(relative, "front matter keys must be literal string identifiers"))
+        key = scalar(key_node, "front matter key")
+        if key is None:
             continue
-        key = key_node.value
         if key in data:
             errors.append(issue(relative, f"duplicate YAML key: {key}"))
-        if not isinstance(value_node, yaml.nodes.ScalarNode) or value_node.tag != string_tag:
-            errors.append(issue(relative, f"{key} must be a YAML string scalar; quote ambiguous booleans, dates, and numbers"))
-            continue
-        if "\n" in value_node.value or "\r" in value_node.value:
-            errors.append(issue(relative, f"{key} must be a single-line scalar"))
-        data[key] = value_node.value
+        if key == "identifiers":
+            if not isinstance(value_node, yaml.nodes.MappingNode):
+                errors.append(issue(relative, "identifiers must be a nested YAML mapping"))
+                continue
+            ids: dict[str, str] = {}
+            for child_key_node, child_value_node in value_node.value:
+                child_key = scalar(child_key_node, "identifier key")
+                if child_key is None:
+                    continue
+                if child_key in ids:
+                    errors.append(issue(relative, f"duplicate YAML identifier key: {child_key}"))
+                value = scalar(child_value_node, f"identifiers.{child_key}")
+                if value is not None:
+                    ids[child_key] = value
+            data[key] = ids
+        else:
+            val = scalar(value_node, key)
+            if val is not None:
+                data[key] = val
     return data, body, body_line, errors
 
 
 def validate_work_fields(relative: Path, data: dict, slug: str, title: str) -> list[str]:
     errors: list[str] = []
-    unknown = data.keys() - META_KEYS
-    missing = META_KEYS - data.keys()
+    unknown = set(data) - META_REQUIRED - META_OPTIONAL
+    missing = META_REQUIRED - set(data)
     if unknown or missing:
         errors.append(issue(relative, f"schema keys mismatch: missing {sorted(missing)}, unknown {sorted(unknown)}"))
-    for name in META_KEYS & data.keys():
+    for name in (META_REQUIRED | {"author_orcid"}) & set(data):
         if not isinstance(data[name], str) or not data[name].strip():
             errors.append(issue(relative, f"{name} must be a nonempty string"))
-    if any(name not in data or not isinstance(data[name], str) for name in META_KEYS):
+    if not META_REQUIRED <= set(data) or any(not isinstance(data[name], str) for name in META_REQUIRED):
         return errors
-    if data["schema"] != "press.work.v1":
-        errors.append(issue(relative, "schema must be press.work.v1"))
+    if data["schema"] != "press.work.v2":
+        errors.append(issue(relative, "schema must be press.work.v2"))
     if data["slug"] != slug:
         errors.append(issue(relative, "slug must match works/<slug>"))
     if data["title"] != title:
@@ -408,26 +439,51 @@ def validate_work_fields(relative: Path, data: dict, slug: str, title: str) -> l
         errors.append(issue(relative, "rights must be one of the enumerated rights identifiers in FORMAT.md"))
     if data["status"] != "draft":
         errors.append(issue(relative, "source status must remain draft; publication status belongs to releases"))
+    if "author_orcid" in data:
+        message = identifier_error("orcid", data["author_orcid"])
+        if message:
+            errors.append(issue(relative, f"author_orcid {message}"))
+    if "identifiers" in data:
+        errors.extend(issue(relative, message) for message in check_identifier_map(data["identifiers"], WORK_IDS, str(relative)))
     return errors
 
 
 def validate_pandoc_front_matter(relative: Path, data: dict, ast: dict) -> list[str]:
-    """Prevent the YAML parser and the publishing compiler from disagreeing."""
+    """Reject disagreements between metadata read by YAML and Pandoc."""
     errors: list[str] = []
     meta = ast.get("meta", {})
     if set(meta) != set(data):
         errors.append(issue(relative, "Pandoc YAML metadata keys differ from source front matter"))
     for key in set(meta) & set(data):
         node = meta[key]
-        if node.get("t") == "MetaInlines":
-            rendered = plain_text(node.get("c", []))
-        elif node.get("t") == "MetaString":
-            rendered = node.get("c", "")
+        if key == "identifiers":
+            if node.get("t") != "MetaMap" or not isinstance(data[key], dict):
+                errors.append(issue(relative, "Pandoc interpreted identifiers differently from the YAML mapping"))
+                continue
+            pandoc_ids = node.get("c", {})
+            if set(pandoc_ids) != set(data[key]):
+                errors.append(issue(relative, "Pandoc identifier keys differ from YAML front matter"))
+            for child_key in set(pandoc_ids) & set(data[key]):
+                sub = pandoc_ids[child_key]
+                if sub.get("t") == "MetaInlines":
+                    rendered = plain_text(sub.get("c", []))
+                elif sub.get("t") == "MetaString":
+                    rendered = sub.get("c", "")
+                else:
+                    errors.append(issue(relative, f"Pandoc identifier {child_key} is not a text value"))
+                    continue
+                if rendered != data[key][child_key]:
+                    errors.append(issue(relative, f"Pandoc metadata differs from YAML scalar for identifiers.{child_key}"))
         else:
-            errors.append(issue(relative, f"Pandoc interpreted YAML field {key} as non-text metadata"))
-            continue
-        if rendered != data[key]:
-            errors.append(issue(relative, f"Pandoc metadata differs from YAML scalar for field {key}"))
+            if node.get("t") == "MetaInlines":
+                rendered = plain_text(node.get("c", []))
+            elif node.get("t") == "MetaString":
+                rendered = node.get("c", "")
+            else:
+                errors.append(issue(relative, f"Pandoc interpreted YAML field {key} as non-text metadata"))
+                continue
+            if rendered != data[key]:
+                errors.append(issue(relative, f"Pandoc metadata differs from YAML scalar for field {key}"))
     return errors
 
 
@@ -640,6 +696,7 @@ def validate_repository(root: Path, paths: list[Path], pandoc: str = "pandoc", *
         if Path("works") / slug / "manuscript.md" not in manuscripts:
             errors.append(issue(Path("works") / slug, "work directory requires manuscript.md"))
     errors.extend(validate_assets(root, tracked))
+    errors.extend(validate_registrations(root, tracked, front_matters))
     return sorted(set(errors))
 
 

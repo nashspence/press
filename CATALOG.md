@@ -11,3 +11,5 @@ When the first edition is published, replace the statement above with entries us
 | Title | v1.0.0 | YYYY-MM-DD | Link to GitHub Release | All rights reserved or specific license |
 
 The release's canonical attached artifact, not the tag or repository snapshot, is the authoritative text for that edition.
+
+For external DOI, ISBN, library-catalog, author and serial identifiers associated with an edition, consult the [registration index](REGISTRATIONS.md). These records may be updated when identifiers become available after publication; the canonical tagged release asset remains unchanged.

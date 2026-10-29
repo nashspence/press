@@ -2,16 +2,14 @@
 
 This directory contains **working sources**, not automatically published editions.
 
-For each work, create a folder named with a lowercase hyphenated slug, such as `works/example-essay/`. Copy the files from [templates/work/](../templates/work/) into it, then update the YAML front matter in `manuscript.md`: its `slug` must match the folder and its `title` must match the H1. See the mandatory [format specification](../FORMAT.md).
-
-A v1-compliant layout is:
+For each work create a lowercase hyphenated folder, e.g. `works/example-essay/`. Copy the files from [templates/work/](../templates/work/) and update the YAML front matter in `manuscript.md`. No separate metadata file is needed. See [FORMAT.md](../FORMAT.md) for executable conventions.
 
 ```text
 works/
   example-essay/
-    README.md         # optional editorial notes
-    manuscript.md     # YAML front matter + canonical working source
-    assets/            # optional local PNG/JPEG/WebP/passive SVG
+    manuscript.md   # required, strict YAML front matter + working Markdown
+    README.md       # optional editorial notes
+    assets/         # optional local images
 ```
 
-Commits and folders are always working history. For published editions, see the [catalog](../CATALOG.md) and [publication protocol](../PUBLICATION.md).
+Optional work-level scholarly and catalog identifiers go in front matter or the post-publication [work registration index](../REGISTRATIONS.md). Version-specific DOIs, ISBNs and OCLC record numbers belong to **edition registration records**. Commits and untagged source trees remain drafts; see [CATALOG.md](../CATALOG.md) for officially published editions.

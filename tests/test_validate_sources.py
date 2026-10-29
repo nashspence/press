@@ -1,6 +1,7 @@
-"""Positive/negative executable tests for Press source format v1."""
+"""Positive/negative executable tests for Press source format v2 and registration index."""
 
 import yaml
+import json
 import sys
 import tempfile
 import unittest
@@ -17,7 +18,7 @@ MANUSCRIPT = ("# On Structure and Identity\n\n"
               "See [the section](#sec-1).\n")
 METADATA = {
     "author": "nashspence", "language": "en", "rights": "all-rights-reserved",
-    "schema": "press.work.v1", "slug": "sample", "status": "draft",
+    "schema": "press.work.v2", "slug": "sample", "status": "draft",
     "title": "On Structure and Identity"
 }
 
@@ -255,7 +256,7 @@ class StrictSourceTests(unittest.TestCase):
         self.assertTrue(any("invalid YAML" in e for e in self.check(front_matter=front)))
 
     def test_unclosed_front_matter(self):
-        self.assertTrue(any("missing closing" in e for e in self.check(front_matter="---\nschema: press.work.v1\n")))
+        self.assertTrue(any("missing closing" in e for e in self.check(front_matter="---\nschema: press.work.v2\n")))
 
     def test_front_matter_requires_blank_separator(self):
         front = "---\n" + yaml.safe_dump(METADATA, sort_keys=False) + "---\n"
@@ -284,6 +285,180 @@ class StrictSourceTests(unittest.TestCase):
         (self.root / self.source.parent / "README.md").write_text("# Notes\n", encoding="utf-8")
         errors = validate_repository(self.root, [Path("works/sample/README.md")])
         self.assertTrue(any("requires manuscript.md" in e for e in errors))
+
+    def test_identifiers_mapping_and_orcid(self):
+        metadata = {**METADATA,
+            "author_orcid": "0000-0002-1825-0097",
+            "identifiers": {
+                "concept_doi": "10.5281/zenodo.1234567",
+                "arxiv": "2501.01234",
+                "openalex": "W2741809807",
+                "wikidata": "Q123456",
+            }}
+        self.assertEqual([], self.check(metadata=metadata))
+
+    def test_partial_optional_identifiers(self):
+        self.assertEqual([], self.check(metadata={**METADATA, "identifiers": {"openalex": "W2741809807"}}))
+
+    def test_empty_identifiers_rejected(self):
+        self.assert_bad("nonempty mapping", metadata={**METADATA, "identifiers": {}})
+
+    def test_unknown_identifier_rejected(self):
+        self.assert_bad("unknown identifier keys", metadata={**METADATA, "identifiers": {"notreal": "123"}})
+
+    def test_identifier_bad_doi(self):
+        self.assert_bad("bare DOI", metadata={**METADATA, "identifiers": {"concept_doi": "https://doi.org/10.1234/foo"}})
+
+    def test_identifier_bad_openalex(self):
+        self.assert_bad("OpenAlex W-ID", metadata={**METADATA, "identifiers": {"openalex": "A123"}})
+
+    def test_identifier_bad_wikidata(self):
+        self.assert_bad("Wikidata Q-ID", metadata={**METADATA, "identifiers": {"wikidata": "Q0"}})
+
+    def test_identifier_bad_arxiv_version(self):
+        self.assert_bad("unversioned arXiv", metadata={**METADATA, "identifiers": {"arxiv": "2501.01234v2"}})
+
+    def test_bad_orcid_checksum(self):
+        self.assert_bad("invalid ORCID", metadata={**METADATA, "author_orcid": "0000-0002-1825-0098"})
+
+    def test_duplicate_identifier_yaml_key(self):
+        prefix = "---\n" + yaml.safe_dump({**METADATA, "identifiers": {"arxiv": "2501.01234"}}, sort_keys=False)
+        prefix += "  arxiv: 2501.01235\n---\n\n"
+        self.assertTrue(any("duplicate YAML identifier key" in e for e in self.check(front_matter=prefix)))
+
+    def test_nested_identifier_sequence_rejected(self):
+        front = "---\n" + yaml.safe_dump(METADATA, sort_keys=False)
+        front += "identifiers:\n  openalex: [W123]\n---\n\n"
+        self.assertTrue(any("prohibited" in e or "string scalar" in e for e in self.check(front_matter=front)))
+
+    def test_nested_non_identifier_map_rejected(self):
+        front = "---\n" + yaml.safe_dump(METADATA, sort_keys=False)
+        front += "author_orcid:\n  orcid: 0000-0002-1825-0097\n---\n\n"
+        self.assertTrue(any("two-space identifiers" in e or "string scalar" in e for e in self.check(front_matter=front)))
+
+    def test_wrong_indent_nested_identifier(self):
+        front = "---\n" + yaml.safe_dump(METADATA, sort_keys=False)
+        front += "identifiers:\n    openalex: W123\n---\n\n"
+        self.assertTrue(any("two-space identifiers" in e for e in self.check(front_matter=front)))
+
+    def test_v1_schema_is_rejected(self):
+        self.assert_bad("schema must be press.work.v2", metadata={**METADATA, "schema": "press.work.v1"})
+
+    @staticmethod
+    def canonical_json(obj):
+        return json.dumps(obj, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
+
+    def edition(self, **overrides):
+        doc = {
+            "schema": "press.edition-registration.v1",
+            "work": "sample", "version": "v1.0.0",
+            "release_url": "https://github.com/nashspence/press/releases/tag/works/sample/v1.0.0",
+            "canonical_artifact": "sample-v1.0.0.html",
+            "artifact_sha256": "a" * 64,
+            "published_at": "2026-10-29T01:20:00Z",
+            "rights": "all-rights-reserved",
+        }
+        doc.update(overrides)
+        return doc
+
+    def test_edition_registration_without_external_ids(self):
+        path = "registrations/editions/sample/v1.0.0.json"
+        self.assertEqual([], self.check(other={path: self.canonical_json(self.edition())}))
+
+    def test_edition_registration_with_isbn_and_version_doi(self):
+        path = "registrations/editions/sample/v1.0.0.json"
+        doc = self.edition(identifiers={"version_doi":"10.5281/zenodo.100001", "isbn_epub":"9780306406157", "oclc":"123456"})
+        self.assertEqual([], self.check(other={path: self.canonical_json(doc)}))
+
+    def test_isbn_cannot_be_reused_for_two_formats(self):
+        path = "registrations/editions/sample/v1.0.0.json"
+        doc = self.edition(identifiers={"isbn_pdf": "9780306406157", "isbn_epub": "9780306406157"})
+        self.assert_bad("reused across records/formats", other={path: self.canonical_json(doc)})
+
+    def test_valid_isni(self):
+        path = "registrations/identities/imprint.json"
+        doc = {"schema":"press.identity.v1", "type":"imprint", "name":"Press", "identifiers":{"isni":"0000 0001 2103 2683"}}
+        self.assertEqual([], self.check(other={path: self.canonical_json(doc)}))
+
+    def test_edition_bad_isbn_checksum(self):
+        path = "registrations/editions/sample/v1.0.0.json"
+        doc = self.edition(identifiers={"isbn_epub":"9780306406158"})
+        self.assert_bad("invalid ISBN-13", other={path:self.canonical_json(doc)})
+
+    def test_edition_invalid_version_doi(self):
+        path = "registrations/editions/sample/v1.0.0.json"
+        doc = self.edition(identifiers={"version_doi":"10.abc/identifier"})
+        self.assert_bad("bare DOI", other={path:self.canonical_json(doc)})
+
+    def test_edition_cannot_use_concept_as_version(self):
+        path = "registrations/editions/sample/v1.0.0.json"
+        doc = self.edition(identifiers={"version_doi":"10.5281/zenodo.1234567"})
+        metadata = {**METADATA, "identifiers":{"concept_doi":"10.5281/zenodo.1234567"}}
+        self.assert_bad("version_doi must differ", metadata=metadata, other={path:self.canonical_json(doc)})
+
+    def test_edition_wrong_tag_url(self):
+        path = "registrations/editions/sample/v1.0.0.json"
+        doc = self.edition(release_url="https://github.com/other/press/releases/tag/works/sample/v1.0.0")
+        self.assert_bad("release_url must identify", other={path:self.canonical_json(doc)})
+
+    def test_edition_invalid_sha256(self):
+        path = "registrations/editions/sample/v1.0.0.json"
+        self.assert_bad("artifact_sha256", other={path:self.canonical_json(self.edition(artifact_sha256="xyz"))})
+
+    def test_edition_bad_timestamp(self):
+        path = "registrations/editions/sample/v1.0.0.json"
+        self.assert_bad("published_at", other={path:self.canonical_json(self.edition(published_at="2026-02-30T01:00:00Z"))})
+
+    def test_registry_duplicate_json_key(self):
+        path = "registrations/editions/sample/v1.0.0.json"
+        raw = self.canonical_json(self.edition()).replace('"schema": ', '"schema": "duplicate",\n  "schema": ')
+        self.assert_bad("duplicate key", other={path:raw})
+
+    def test_registry_noncanonical_json(self):
+        path = "registrations/editions/sample/v1.0.0.json"
+        self.assert_bad("canonical JSON", other={path:json.dumps(self.edition()) + "\n"})
+
+    def test_registry_unknown_key(self):
+        path = "registrations/editions/sample/v1.0.0.json"
+        self.assert_bad("invalid fields", other={path:self.canonical_json(self.edition(extra="ignored"))})
+
+    def test_registry_wrong_location(self):
+        self.assert_bad("unsupported registration file location", other={"registrations/unrecognized.json":"{}\n"})
+
+    def test_work_index_valid(self):
+        path = "registrations/works/sample.json"
+        doc = {"schema":"press.work-registration.v1", "work":"sample", "identifiers":{"openalex":"W2741809807"}}
+        self.assertEqual([], self.check(other={path:self.canonical_json(doc)}))
+
+    def test_work_index_conflicts_with_manuscript(self):
+        path = "registrations/works/sample.json"
+        doc = {"schema":"press.work-registration.v1", "work":"sample", "identifiers":{"openalex":"W123"}}
+        self.assert_bad("conflicts with manuscript", metadata={**METADATA,"identifiers":{"openalex":"W2741809807"}}, other={path:self.canonical_json(doc)})
+
+    def test_identity_record_author(self):
+        path = "registrations/identities/author.json"
+        doc = {"schema":"press.identity.v1", "type":"author", "name":"Nash Spence", "identifiers":{"orcid":"0000-0002-1825-0097"}}
+        self.assertEqual([], self.check(other={path:self.canonical_json(doc)}))
+
+    def test_identity_record_imprint(self):
+        path = "registrations/identities/imprint.json"
+        doc = {"schema":"press.identity.v1", "type":"imprint", "name":"Press", "identifiers":{"wikidata":"Q1234"}}
+        self.assertEqual([], self.check(other={path:self.canonical_json(doc)}))
+
+    def test_issn_series_record(self):
+        path = "registrations/series/notes.json"
+        doc = {"schema":"press.series.v1", "slug":"notes", "title":"Notes", "identifiers":{"issn":"0317-8471"}}
+        self.assertEqual([], self.check(other={path:self.canonical_json(doc)}))
+
+    def test_bad_issn_series(self):
+        path = "registrations/series/notes.json"
+        doc = {"schema":"press.series.v1", "slug":"notes", "title":"Notes", "identifiers":{"issn":"0317-8472"}}
+        self.assert_bad("invalid ISSN", other={path:self.canonical_json(doc)})
+
+    def test_invalid_isni(self):
+        path = "registrations/identities/imprint.json"
+        doc = {"schema":"press.identity.v1", "type":"imprint", "name":"Press", "identifiers":{"isni":"0000 0001 2103 2684"}}
+        self.assert_bad("invalid ISNI", other={path:self.canonical_json(doc)})
 
 
 if __name__ == "__main__":

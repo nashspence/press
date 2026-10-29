@@ -56,3 +56,11 @@ Unreleased material in a public repository can be seen, copied, or archived. Jou
 ## Source compliance
 
 Manuscript sources **must** follow [FORMAT.md](FORMAT.md), including the required in-manuscript YAML front matter, and pass the **Validate manuscript sources** check at the reviewed revision before being tagged for publication. This is an editorial requirement in this protocol; the repository still needs an active branch ruleset to enforce merges, and a separate release gate for pre-publication enforcement. The post-publication release checker cannot prevent a release.
+
+## External identifier registration
+
+Manuscripts now use [the strict `press.work.v2` schema](FORMAT.md). Its optional work-level `author_orcid` and `identifiers` fields carry only real assigned identifiers. Do not place edition/format ISBNs or version DOIs in manuscript metadata.
+
+After an official GitHub Release is published, record its canonical artifact filename, SHA-256 digest, release URL, publication timestamp, and any issued version DOI, ISBN, or catalog record number in the separate [registration index](REGISTRATIONS.md). Work IDs discovered later may be entered into a work registration record without changing an immutable issued edition. Author/imprint and serial identifiers have different scopes.
+
+The registry validates ID syntax, checksums, scope and deterministic serialization **offline**; it does not verify registry ownership, availability, release existence, or file digests against GitHub release assets. Registering an identifier is not itself publishing an edition. No identifier is invented or issued by this repository.
