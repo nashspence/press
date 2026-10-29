@@ -251,7 +251,8 @@ def validate_registrations(root: Path, paths: set[Path], work_frontmatter: dict[
                 errors.append(f"{path}: artifact_sha256 must be lowercase hexadecimal SHA-256")
             if not valid_utc(doc.get("published_at")):
                 errors.append(f"{path}: published_at must be a valid UTC timestamp (YYYY-MM-DDTHH:MM:SSZ)")
-            if doc.get("rights") not in RIGHTS:
+            rights = doc.get("rights")
+            if not isinstance(rights, str) or rights not in RIGHTS:
                 errors.append(f"{path}: rights must be an approved rights identifier")
             if "identifiers" in doc:
                 errors.extend(check_identifier_map(doc["identifiers"], EDITION_IDS, context))

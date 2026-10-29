@@ -401,6 +401,10 @@ class StrictSourceTests(unittest.TestCase):
         doc = self.edition(release_url="https://github.com/other/press/releases/tag/works/sample/v1.0.0")
         self.assert_bad("release_url must identify", other={path:self.canonical_json(doc)})
 
+    def test_edition_nonstring_rights_clean_error(self):
+        path = "registrations/editions/sample/v1.0.0.json"
+        self.assert_bad("rights must be an approved", other={path:self.canonical_json(self.edition(rights=["all-rights-reserved"]))})
+
     def test_edition_invalid_sha256(self):
         path = "registrations/editions/sample/v1.0.0.json"
         self.assert_bad("artifact_sha256", other={path:self.canonical_json(self.edition(artifact_sha256="xyz"))})
