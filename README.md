@@ -28,4 +28,6 @@ The repository can be used for public drafting, but public availability may stil
 
 ## Source format and checks
 
-Use [FORMAT.md](FORMAT.md) for the canonical Markdown, Unicode, math, and stable-section conventions. Pushes and pull requests run the [source validation workflow](.github/workflows/validate-source.yml), which checks every tracked Markdown file and tests HTML/MathML conversion. CI does not publish an official edition.
+The versioned, executable source contract is [FORMAT.md](FORMAT.md), implemented by [the validator](scripts/validate_sources.py) and [its regression tests](tests/test_validate_sources.py). Work folders require `manuscript.md` and canonical `metadata.json`; use [the work template](templates/work/) to start.
+
+[Source validation](.github/workflows/validate-source.yml) runs on every push and pull request. It checks tracked Markdown, work metadata, links, static assets, parser consistency, and generated HTML5/MathML. **It does not publish an edition or prevent merges until an active branch ruleset requires its passing check.**

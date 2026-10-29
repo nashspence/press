@@ -1,83 +1,205 @@
-"""Regression tests for the source publication policy validator."""
+"""Positive/negative executable tests for Press source format v1."""
 
+import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
-import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from validate_sources import validate_repository  # noqa: E402
 
 
-class SourceValidationTests(unittest.TestCase):
-    def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
-        self.path = Path("works/sample/manuscript.md")
-        (self.root / self.path.parent).mkdir(parents=True)
+MANUSCRIPT = ("# On Structure and Identity\n\n"
+              "<a id=\"sec-1\"></a>\n## § 1 — Foundations\n\n"
+              "Let $S$ denote symbols, and consider $x \\in S$.\n\n"
+              "$$\n\\forall x \\in S, \\quad x=x\n$$\n\n"
+              "See [the section](#sec-1).\n")
+METADATA = {
+    "author": "nashspence", "language": "en", "rights": "all-rights-reserved",
+    "schema": "press.work.v1", "slug": "sample", "status": "draft",
+    "title": "On Structure and Identity"
+}
 
-    def check(self, text, additional=None):
-        (self.root / self.path).write_bytes(text.encode("utf-8"))
-        paths = [self.path]
-        for rel, content in (additional or {}).items():
-            dest = self.root / rel
+
+class StrictSourceTests(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.source = Path("works/sample/manuscript.md")
+        self.meta = Path("works/sample/metadata.json")
+        (self.root / self.source.parent).mkdir(parents=True)
+
+    def check(self, source=MANUSCRIPT, metadata=METADATA, other=None):
+        (self.root / self.source).write_bytes(source.encode("utf-8"))
+        paths = [self.source]
+        if metadata is not None:
+            raw = (json.dumps(metadata, sort_keys=True, indent=2, ensure_ascii=False) + "\n")
+            (self.root / self.meta).write_text(raw, encoding="utf-8")
+            paths.append(self.meta)
+        for name, content in (other or {}).items():
+            path = Path(name)
+            dest = self.root / path
             dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(content, encoding="utf-8")
-            paths.append(Path(rel))
+            dest.write_bytes(content.encode("utf-8") if isinstance(content, str) else content)
+            paths.append(path)
         return validate_repository(self.root, paths)
 
-    def test_valid_unicode_math_anchors_and_internal_reference(self):
-        source = (
-            "# Structure and Identity\n\n"
-            "<a id=\"sec-1\"></a>\n"
-            "## § 1 — Foundations\n\n"
-            "For every $x \u2208 S$, there is $y$ with $y=x$.\n\n"
-            "$$\n\\forall x \\in S, \\quad x=x\n$$\n\n"
-            "See [the section](#sec-1).\n"
-        )
-        self.assertEqual([], self.check(source))
+    def assert_bad(self, needle, source=MANUSCRIPT, metadata=METADATA, other=None):
+        errors = self.check(source, metadata, other)
+        self.assertTrue(any(needle in error for error in errors), "expected " + needle + "; got " + str(errors))
 
-    def test_non_nfc_rejected(self):
-        source = "# Cafe\u0301\n"
-        self.assertTrue(any("NFC" in e for e in self.check(source)))
+    def test_canonical_example(self):
+        self.assertEqual([], self.check())
 
-    def test_missing_section_anchor_rejected(self):
-        self.assertTrue(any("preceding" in e for e in self.check("# Title\n\n## Subsection\n")))
+    def test_notes_and_gfm_table(self):
+        content = MANUSCRIPT + "A note[^ref].\n\n[^ref]: Context.\n\n| A | B |\n|---|---|\n| 1 | 2 |\n"
+        self.assertEqual([], self.check(content))
 
-    def test_duplicate_anchor_rejected(self):
-        source = "# Title\n\n<a id=\"same\"></a>\n## First\n\n<a id=\"same\"></a>\n## Second\n"
-        self.assertTrue(any("duplicate explicit anchor" in e for e in self.check(source)))
+    def test_invalid_utf8(self):
+        self.check()
+        (self.root / self.source).write_bytes(b"\xff# Title\n")
+        self.assertIn("UTF-8", " ".join(validate_repository(self.root, [self.source, self.meta])))
 
-    def test_broken_local_link_rejected(self):
-        source = "# Title\n\n[missing source](does-not-exist.md)\n"
-        self.assertTrue(any("broken local link" in e for e in self.check(source)))
+    def test_bom(self):
+        self.assert_bad("BOM", "\ufeff" + MANUSCRIPT)
 
-    def test_broken_section_reference_rejected(self):
-        source = "# Title\n\n[missing section](#no-such-id)\n"
-        self.assertTrue(any("unresolved Markdown section link" in e for e in self.check(source)))
+    def test_nfc(self):
+        self.assert_bad("NFC", MANUSCRIPT.replace("Identity", "Identite\u0301"))
 
-    def test_missing_image_alt_text_rejected(self):
-        source = "# Title\n\n![](figure.svg)\n"
-        (self.root / "works/sample/figure.svg").write_text("<svg/>", encoding="utf-8")
-        self.assertTrue(any("alt text" in e for e in self.check(source)))
+    def test_bidi_override_prohibited(self):
+        self.assert_bad("bidirectional override", MANUSCRIPT + "Suspicious \u202e reversal.\n")
 
-    def test_code_fence_does_not_require_an_anchor(self):
-        source = "# Title\n\n```markdown\n## Example inside code\n```\n"
-        self.assertEqual([], self.check(source))
+    def test_unknown_work_source_file(self):
+        self.assert_bad("unsupported file path", other={"works/sample/random.txt": "unvalidated material\n"})
 
-    def test_inline_display_math_rejected(self):
-        self.assertTrue(any("alone on its line" in e for e in self.check("# Title\n\nMath $$a+b$$.\n")))
+    def test_crlf(self):
+        self.assert_bad("CR/CRLF", MANUSCRIPT.replace("\n", "\r\n"))
 
-    def test_unclosed_display_math_rejected(self):
-        self.assertTrue(any("unclosed display-math" in e for e in self.check("# Title\n\n$$\nx + y\n")))
+    def test_final_newline(self):
+        self.assert_bad("final newline", MANUSCRIPT.rstrip("\n"))
 
-    def test_crlf_and_bom_rejected(self):
-        raw = b"\xef\xbb\xbf# Title\r\n"
-        (self.root / self.path).write_bytes(raw)
-        errors = validate_repository(self.root, [self.path])
-        self.assertTrue(any("BOM" in e for e in errors))
-        self.assertTrue(any("LF line endings" in e for e in errors))
+    def test_trailing_whitespace(self):
+        self.assert_bad("trailing whitespace", MANUSCRIPT.replace("## § 1 — Foundations\n", "## § 1 — Foundations \n"))
+
+    def test_no_h1(self):
+        self.assert_bad("exactly one ATX H1", MANUSCRIPT.replace("# On Structure", "## On Structure"))
+
+    def test_duplicate_h1(self):
+        self.assert_bad("exactly one ATX H1", MANUSCRIPT + "\n# Another title\n")
+
+    def test_skip_heading_level(self):
+        self.assert_bad("heading level skipped", MANUSCRIPT.replace("## § 1", "#### § 1"))
+
+    def test_missing_anchor(self):
+        self.assert_bad("requires an explicit stable anchor", MANUSCRIPT.replace('<a id="sec-1"></a>\n', ""))
+
+    def test_orphan_anchor(self):
+        self.assert_bad("unattached anchor", MANUSCRIPT + '\n<a id="orphan"></a>\n')
+
+    def test_duplicate_anchor(self):
+        self.assert_bad("duplicate anchor", MANUSCRIPT.replace('<a id="sec-1"></a>', '<a id="sec-1"></a>\n<a id="sec-1"></a>'))
+
+    def test_reject_arbitrary_html(self):
+        self.assert_bad("raw HTML is prohibited", MANUSCRIPT + "<script>alert(1)</script>\n")
+
+    def test_reject_legacy_math(self):
+        self.assert_bad("not backslash math delimiters", MANUSCRIPT + r"\(x\)" + "\n")
+
+    def test_unbalanced_inline_math(self):
+        self.assert_bad("unmatched inline $", MANUSCRIPT + "An $unclosed dollar.\n")
+
+    def test_math_not_parsed(self):
+        self.assert_bad("math delimiters did not parse", MANUSCRIPT + "This is $ x $ with spaces.\n")
+
+    def test_currency_must_be_escaped(self):
+        self.assert_bad("unmatched inline $", MANUSCRIPT + "Cost is $5.\n")
+
+    def test_escaped_currency(self):
+        self.assertEqual([], self.check(MANUSCRIPT + r"Cost is \$5." + "\n"))
+
+    def test_inline_double_dollar(self):
+        self.assert_bad("display math $$ must be alone", MANUSCRIPT + "$$E=mc^2$$\n")
+
+    def test_unclosed_display_math(self):
+        self.assert_bad("unclosed display math", MANUSCRIPT + "$$\nE=mc^2\n")
+
+    def test_unmatched_code_span(self):
+        self.assert_bad("unmatched backtick", MANUSCRIPT + "An `unclosed code span.\n")
+
+    def test_code_fence_masks_headings_and_math(self):
+        self.assertEqual([], self.check(MANUSCRIPT + "```markdown\n## Hidden heading\n$$ignored$$\n```\n"))
+
+    def test_unclosed_fence(self):
+        self.assert_bad("unclosed fenced code", MANUSCRIPT + "```md\nexample\n")
+
+    def test_footnote_ref_missing_definition(self):
+        self.assert_bad("unresolved footnote", MANUSCRIPT + "A missing[^note].\n")
+
+    def test_footnote_unused_definition(self):
+        self.assert_bad("unused footnote", MANUSCRIPT + "[^unused]: Unused.\n")
+
+    def test_footnote_duplicate_definition(self):
+        self.assert_bad("duplicate footnote", MANUSCRIPT + "A note[^x].\n\n[^x]: One.\n[^x]: Two.\n")
+
+    def test_local_link_broken(self):
+        self.assert_bad("broken local link", MANUSCRIPT + "[missing](missing.md)\n")
+
+    def test_local_link_untracked(self):
+        dest = self.root / "works/sample/untracked.md"
+        dest.write_text("# Local\n", encoding="utf-8")
+        self.assert_bad("linked file is not tracked", MANUSCRIPT + "[untracked](untracked.md)\n")
+
+    def test_local_fragment_missing(self):
+        self.assert_bad("unresolved Markdown section link", MANUSCRIPT + "[wrong](#missing)\n")
+
+    def test_reject_insecure_url(self):
+        self.assert_bad("unsupported/external URI", MANUSCRIPT + "[bad](javascript:alert(1))\n")
+
+    def test_reject_image_missing_alt(self):
+        self.assert_bad("image alt text required", MANUSCRIPT + "![](assets/sample.svg)\n",
+                        other={"works/sample/assets/sample.svg": '<svg xmlns="http://www.w3.org/2000/svg"/>\n'})
+
+    def test_reject_external_image(self):
+        self.assert_bad("unsupported/external URI", MANUSCRIPT + "![pic](https://example.com/image.png)\n")
+
+    def test_valid_svg_asset(self):
+        source = MANUSCRIPT + "![plot](assets/figure.svg)\n"
+        other = {"works/sample/assets/figure.svg": '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0L1 1"/></svg>\n'}
+        self.assertEqual([], self.check(source, other=other))
+
+    def test_reject_executable_svg(self):
+        source = MANUSCRIPT + "![plot](assets/figure.svg)\n"
+        other = {"works/sample/assets/figure.svg": '<svg xmlns="http://www.w3.org/2000/svg"><script/></svg>\n'}
+        self.assert_bad("SVG element", source, other=other)
+
+    def test_requires_metadata(self):
+        self.assert_bad("requires tracked metadata.json", metadata=None)
+
+    def test_metadata_schema(self):
+        self.assert_bad("schema keys mismatch", metadata={**METADATA, "extra": "unexpected"})
+
+    def test_metadata_title_mismatch(self):
+        self.assert_bad("title must exactly match", metadata={**METADATA, "title": "Incorrect"})
+
+    def test_metadata_slug_mismatch(self):
+        self.assert_bad("slug must match", metadata={**METADATA, "slug": "other"})
+
+    def test_metadata_invalid_rights(self):
+        self.assert_bad("enumerated rights", metadata={**METADATA, "rights": "MIT"})
+
+    def test_metadata_published_status_disallowed(self):
+        self.assert_bad("status must remain draft", metadata={**METADATA, "status": "published"})
+
+    def test_does_not_validate_heading_inside_code(self):
+        content = MANUSCRIPT + '````\n<a id="fake"></a>\n## Not a section\n````\n'
+        self.assertEqual([], self.check(content))
+
+    def test_noncanonical_metadata(self):
+        self.check()
+        (self.root / self.meta).write_text(json.dumps(METADATA, indent=4) + "\n", encoding="utf-8")
+        self.assertIn("canonical JSON", " ".join(validate_repository(self.root, [self.source, self.meta])))
 
 
 if __name__ == "__main__":

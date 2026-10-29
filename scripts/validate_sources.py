@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Check every tracked Markdown source against FORMAT.md.
+"""Strict, offline, fail-closed validator for Press source format v1.
 
-Uses Pandoc's GFM reader, and intentionally avoids rewriting any manuscript.
+Pandoc is a required dependency: parser warnings and HTML render warnings fail CI.
+Git tracks the allowed source set; a public branch must be protected separately.
 """
 
 from __future__ import annotations
 
+import html.parser
 import json
 import re
 import subprocess
@@ -14,233 +16,575 @@ import unicodedata
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
+FORMAT = "gfm+tex_math_dollars+raw_html"
 SOURCE_EXTENSIONS = {".md", ".markdown"}
-PANDOC_READER = "gfm+tex_math_dollars+raw_html"
-ANCHOR = re.compile(
-    r"^\s*<a\s+(?:id|name)=['\"]([a-z][a-z0-9]*(?:-[a-z0-9]+)*)['\"]\s*>\s*</a>\s*$",
-)
-ATX_HEADING = re.compile(r"^ {0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
-FENCE_START = re.compile(r"^ {0,3}(`{3,}|~{3,})")
-SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+WORK_SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
+ANCHOR = re.compile(r'<a id="([a-z][a-z0-9]*(?:-[a-z0-9]+)*)"></a>\Z')
+ATX = re.compile(r"^#{1,6}[ \t]+\S")
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+FOOTNOTE = re.compile(r"\[\^([a-z0-9]+(?:-[a-z0-9]+)*)\]")
+FOOTNOTE_DEF = re.compile(r"^\[\^([a-z0-9]+(?:-[a-z0-9]+)*)\]:[ \t]+")
+RIGHTS = {"all-rights-reserved", "CC-BY-4.0", "CC-BY-ND-4.0", "CC-BY-NC-ND-4.0", "CC0-1.0"}
+META_KEYS = {"schema", "slug", "title", "author", "language", "rights", "status"}
+LANGUAGE = re.compile(r"[a-z]{2,3}(?:-[A-Z]{2})?\Z")
 
 
-def report(path: Path, problem: str, line: int | None = None) -> str:
-    return f"{path}:{line}: {problem}" if line is not None else f"{path}: {problem}"
+def issue(path: Path, message: str, line: int | None = None) -> str:
+    return f"{path}:{line}: {message}" if line else f"{path}: {message}"
 
 
-def visible_lines(source: str) -> list[tuple[int, str]]:
-    """Mask fenced and indented code, which are not prose/heading syntax."""
-    visible = []
-    fence_char = ""
-    fence_length = 0
-    for n, line in enumerate(source.splitlines(), start=1):
-        if fence_char:
-            if re.fullmatch(r" {0,3}" + re.escape(fence_char) + "{" + str(fence_length) + r",}\s*", line):
-                fence_char = ""
-                fence_length = 0
-            visible.append((n, ""))
-            continue
-        fence = FENCE_START.match(line)
-        if fence:
-            fence_char = fence.group(1)[0]
-            fence_length = len(fence.group(1))
-            visible.append((n, ""))
-            continue
-        # Indented code is not prose, but a bullet with indentation may be.
-        visible.append((n, "" if line.startswith("    ") else line))
-    return visible
-
-
-def walk(obj):
-    if isinstance(obj, dict):
-        if "t" in obj:
-            yield obj
-        for item in obj.values():
-            yield from walk(item)
-    elif isinstance(obj, list):
-        for item in obj:
-            yield from walk(item)
-
-
-def inline_text(inlines) -> str:
-    text = []
-    for node in walk(inlines):
-        if node["t"] == "Str":
-            text.append(node.get("c", ""))
-        elif node["t"] in ("Code", "Math"):
-            content = node.get("c", [])
-            if isinstance(content, list) and len(content) > 1:
-                text.append(str(content[1]))
-    return "".join(text)
-
-
-def validate_text(path: Path, raw: bytes, manuscript: bool) -> tuple[str | None, set[str], list[str]]:
+def read_text(path: Path, relative: Path) -> tuple[str | None, list[str]]:
     errors: list[str] = []
+    if path.is_symlink():
+        return None, [issue(relative, "symlinks are prohibited")]
     try:
-        source = raw.decode("utf-8", errors="strict")
-    except UnicodeDecodeError as exc:
-        return None, set(), [report(path, f"not valid UTF-8: {exc}")]
-    if source.startswith("\ufeff"):
-        errors.append(report(path, "UTF-8 BOM is prohibited"))
-    if "\r" in source:
-        errors.append(report(path, "use LF line endings (CR/CRLF found)"))
-    if source and not source.endswith("\n"):
-        errors.append(report(path, "file must end with a newline"))
-    if unicodedata.normalize("NFC", source) != source:
-        errors.append(report(path, "text must use Unicode NFC normalization"))
-    for n, line in enumerate(source.splitlines(), start=1):
-        if any((ord(ch) < 32 and ch not in "\t\n\r") or ord(ch) == 127 for ch in line):
-            errors.append(report(path, "non-text control character", n))
-    lines = visible_lines(source)
-    anchors: set[str] = set()
-    heading_levels: list[tuple[int, int]] = []
-    for i, (line_no, line) in enumerate(lines):
+        text = path.read_bytes().decode("utf-8", "strict")
+    except (UnicodeDecodeError, OSError) as exc:
+        return None, [issue(relative, f"not readable strict UTF-8: {exc}")]
+    if text.startswith("\ufeff"):
+        errors.append(issue(relative, "UTF-8 BOM is prohibited"))
+    if "\r" in text:
+        errors.append(issue(relative, "CR/CRLF prohibited; use LF"))
+    if not text.endswith("\n"):
+        errors.append(issue(relative, "exactly one final newline required"))
+    elif text.endswith("\n\n"):
+        errors.append(issue(relative, "use exactly one terminal newline (no extra blank line at EOF)"))
+    if unicodedata.normalize("NFC", text) != text:
+        errors.append(issue(relative, "non-NFC Unicode text"))
+    for number, line in enumerate(text.splitlines(), 1):
+        if any((ord(c) < 32 and c != "\t") or ord(c) == 127 for c in line):
+            errors.append(issue(relative, "non-printable control character", number))
+        if any(c in "\u200b\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069" for c in line):
+            errors.append(issue(relative, "bidirectional override or zero-width space prohibited", number))
+        if line.rstrip(" \t") != line:
+            errors.append(issue(relative, "trailing whitespace", number))
+    return text, errors
+
+
+def visible_lines(source: str) -> tuple[list[tuple[int, str]], list[str]]:
+    """Hide fenced code, indented code and display math; retain source line numbers."""
+    lines: list[tuple[int, str]] = []
+    errors: list[str] = []
+    fence: str | None = None
+    fence_size = 0
+    math_start: int | None = None
+    for number, line in enumerate(source.splitlines(), 1):
+        if fence:
+            if re.fullmatch(r" {0,3}" + re.escape(fence) + "{" + str(fence_size) + r",}[ \t]*", line):
+                fence = None
+            lines.append((number, ""))
+            continue
+        opening = FENCE.match(line)
+        if opening and math_start is None:
+            fence = opening.group(1)[0]
+            fence_size = len(opening.group(1))
+            lines.append((number, ""))
+            continue
+        if line.startswith("    ") and math_start is None:
+            lines.append((number, ""))
+            continue
+        if line.strip() == "$$":
+            math_start = None if math_start is not None else number
+            lines.append((number, "$$"))
+            continue
+        if math_start is not None:
+            lines.append((number, ""))
+        else:
+            lines.append((number, line))
+    if fence:
+        errors.append(f"unclosed fenced code block (at or before line {number})")
+    if math_start is not None:
+        errors.append(f"unclosed display math starting at line {math_start}")
+    return lines, errors
+
+
+def strip_inline_code(line: str) -> tuple[str, bool]:
+    """Mask equal-length backtick code spans; unmatched runs are errors."""
+    out = []
+    cursor = 0
+    unmatched = False
+    while cursor < len(line):
+        if line[cursor] != "`":
+            out.append(line[cursor])
+            cursor += 1
+            continue
+        end_run = cursor
+        while end_run < len(line) and line[end_run] == "`":
+            end_run += 1
+        marker = line[cursor:end_run]
+        match = re.search(r"(?<!`)" + re.escape(marker) + r"(?!`)", line[end_run:])
+        if match is None:
+            unmatched = True
+            out.append(" " * len(marker))
+            cursor = end_run
+        else:
+            close_end = end_run + match.end()
+            out.append(" " * (close_end - cursor))
+            cursor = close_end
+    return "".join(out), unmatched
+
+
+def unescaped_positions(line: str, character: str) -> list[int]:
+    positions = []
+    for i, char in enumerate(line):
+        if char != character:
+            continue
+        slashes = 0
+        j = i - 1
+        while j >= 0 and line[j] == "\\":
+            slashes += 1
+            j -= 1
+        if slashes % 2 == 0:
+            positions.append(i)
+    return positions
+
+
+def inspect_manuscript_syntax(relative: Path, source: str) -> tuple[dict, list[str]]:
+    errors: list[str] = []
+    lines, block_errors = visible_lines(source)
+    errors.extend(issue(relative, message) for message in block_errors)
+    headings: list[tuple[int, int, str]] = []
+    anchors: dict[str, int] = {}
+    attached: set[str] = set()
+    footnote_defs: dict[str, int] = {}
+    footnote_refs: list[tuple[str, int]] = []
+    inline_math_count = 0
+    display_math_count = 0
+    in_display = False
+
+    for index, (number, line) in enumerate(lines):
+        if line.strip() == "$$":
+            display_math_count += 1 if not in_display else 0
+            in_display = not in_display
+            continue
+        if not line:
+            continue
+        masked, unmatched = strip_inline_code(line)
+        if unmatched:
+            errors.append(issue(relative, "unmatched backtick code span", number))
+        if "\\(" in masked or "\\)" in masked or "\\[" in masked or "\\]" in masked:
+            errors.append(issue(relative, "use $...$ or standalone $$ math, not backslash math delimiters", number))
+        dollars = unescaped_positions(masked, "$")
+        if len(dollars) % 2:
+            errors.append(issue(relative, "unmatched inline $ (escape literal currency with \\$)", number))
+        if any(dollars[j + 1] == dollars[j] + 1 for j in range(len(dollars) - 1)):
+            errors.append(issue(relative, "display math $$ must be alone on its line", number))
+        inline_math_count += len(dollars) // 2
+
         anchor = ANCHOR.fullmatch(line)
         if anchor:
-            slug = anchor.group(1)
-            if slug in anchors:
-                errors.append(report(path, f"duplicate explicit anchor #{slug}", line_no))
-            anchors.add(slug)
-        heading = ATX_HEADING.match(line)
-        if not heading:
+            ident = anchor.group(1)
+            if ident in anchors:
+                errors.append(issue(relative, f"duplicate anchor #{ident}", number))
+            anchors[ident] = number
             continue
-        level = len(heading.group(1))
-        heading_levels.append((line_no, level))
-        if manuscript and level > 1:
-            j = i - 1
-            while j >= 0 and not lines[j][1].strip() and i - j <= 2:
-                j -= 1
-            if j < 0 or not ANCHOR.fullmatch(lines[j][1]):
-                errors.append(report(path, f'level-{level} heading needs a preceding <a id="stable-id"></a>', line_no))
-    if manuscript:
-        title_lines = [n for n, level in heading_levels if level == 1]
-        if len(title_lines) != 1:
-            errors.append(report(path, f"manuscript needs exactly one ATX # title; found {len(title_lines)}"))
-        elif heading_levels and heading_levels[0][1] != 1:
-            errors.append(report(path, "first heading in manuscript must be # title", heading_levels[0][0]))
-        previous_level = 0
-        for n, level in heading_levels:
-            if previous_level and level > previous_level + 1:
-                errors.append(report(path, f"skipped heading level: H{previous_level} to H{level}", n))
-            previous_level = level
-        display_open: int | None = None
-        for n, line in lines:
-            # Inline code is literal, not a math delimiter.
-            prose = re.sub(r"(`+).*?\1", "", line)
-            prose = prose.replace(r"\$", "")
-            if "$$" in prose and prose.strip() != "$$":
-                errors.append(report(path, "display-math $$ must be alone on its line", n))
-            if prose.strip() == "$$":
-                display_open = None if display_open is not None else n
-        if display_open is not None:
-            errors.append(report(path, "unclosed display-math $$ delimiter", display_open))
-    return source, anchors, errors
+        if line.startswith("<a ") and not anchor:
+            errors.append(issue(relative, "only exact <a id=\"slug\"></a> anchors are allowed", number))
+
+        if ATX.match(line):
+            match = re.match(r"^(#{1,6})[ \t]+(.+)$", line)
+            assert match is not None
+            level = len(match.group(1))
+            headings.append((number, level, match.group(2)))
+            if level > 1:
+                j = index - 1
+                while j >= 0 and not lines[j][1].strip() and index - j <= 2:
+                    j -= 1
+                prev = ANCHOR.fullmatch(lines[j][1]) if j >= 0 else None
+                if prev:
+                    attached.add(prev.group(1))
+                else:
+                    errors.append(issue(relative, f"H{level} requires an explicit stable anchor immediately before it", number))
+
+        definition = FOOTNOTE_DEF.match(masked)
+        if definition:
+            identifier = definition.group(1)
+            if identifier in footnote_defs:
+                errors.append(issue(relative, f"duplicate footnote [^{identifier}]", number))
+            footnote_defs[identifier] = number
+        for match in FOOTNOTE.finditer(masked):
+            if definition and match.start() == 0:
+                continue
+            footnote_refs.append((match.group(1), number))
+
+    for ident, number in anchors.items():
+        if ident not in attached:
+            errors.append(issue(relative, f"unattached anchor #{ident}", number))
+    for ident, number in footnote_refs:
+        if ident not in footnote_defs:
+            errors.append(issue(relative, f"unresolved footnote [^{ident}]", number))
+    for ident, number in footnote_defs.items():
+        if not any(ref == ident for ref, _ in footnote_refs):
+            errors.append(issue(relative, f"unused footnote definition [^{ident}]", number))
+    if len([h for h in headings if h[1] == 1]) != 1:
+        errors.append(issue(relative, "manuscript requires exactly one ATX H1 title"))
+    if headings and headings[0][1] != 1:
+        errors.append(issue(relative, "first heading must be H1", headings[0][0]))
+    last = 0
+    for number, level, _ in headings:
+        if last and level > last + 1:
+            errors.append(issue(relative, f"heading level skipped H{last} → H{level}", number))
+        last = level
+    return {"headings": headings, "anchors": set(anchors), "inline_math": inline_math_count,
+            "display_math": display_math_count, "footnote_refs": len(footnote_refs)}, errors
 
 
-def pandoc_ast(path: Path, pandoc: str) -> tuple[dict | None, list[str]]:
-    cmd = [pandoc, "--from", PANDOC_READER, "--to", "json", str(path)]
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    except FileNotFoundError:
-        return None, [report(path, f"Pandoc not found: {pandoc}")]
+def walk(value):
+    if isinstance(value, dict):
+        if isinstance(value.get("t"), str):
+            yield value
+        for child in value.values():
+            yield from walk(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from walk(child)
+
+
+def plain_text(value) -> str:
+    bits: list[str] = []
+    def visit(node):
+        if isinstance(node, dict):
+            token = node.get("t")
+            if token == "Str":
+                bits.append(node["c"])
+            elif token in ("Space", "SoftBreak", "LineBreak"):
+                bits.append(" ")
+            elif token == "Code":
+                bits.append(node["c"][1])
+            elif token == "Math":
+                bits.append(node["c"][1])
+            else:
+                visit(node.get("c", []))
+        elif isinstance(node, list):
+            for sub in node:
+                visit(sub)
+    visit(value)
+    return "".join(bits).strip()
+
+
+def parse_document(path: Path, relative: Path) -> tuple[dict | None, list[str]]:
+    result = subprocess.run(["pandoc", "--fail-if-warnings", "--from", FORMAT, "--to", "json", str(path)],
+                            capture_output=True, text=True, check=False)
     if result.returncode:
-        return None, [report(path, "Pandoc could not parse GFM: " + result.stderr.strip())]
+        return None, [issue(relative, "Pandoc parse failed or warned: " + result.stderr.strip())]
     try:
         return json.loads(result.stdout), []
     except json.JSONDecodeError as exc:
-        return None, [report(path, f"Pandoc returned invalid JSON: {exc}")]
+        return None, [issue(relative, f"Pandoc returned invalid JSON: {exc}")]
 
 
-def validate_repository(root: Path, paths: list[Path], pandoc: str = "pandoc") -> list[str]:
-    """Validate all given repo-relative Markdown files. No network calls."""
-    root = root.resolve()
+class HtmlCheck(html.parser.HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.h1 = 0
+        self.math = 0
+        self.scripts = 0
+        self.bad_imgs = 0
+    def handle_starttag(self, tag, attrs):
+        attributes = dict(attrs)
+        if tag == "h1":
+            self.h1 += 1
+        if tag == "math":
+            self.math += 1
+        if tag == "script":
+            self.scripts += 1
+        if tag == "img" and not attributes.get("alt"):
+            self.bad_imgs += 1
+
+
+def render_html(path: Path, relative: Path, expected_math: int, manuscript: bool) -> list[str]:
+    result = subprocess.run([
+        "pandoc", "--fail-if-warnings", "--from", FORMAT, "--to", "html5", "--standalone",
+        "--mathml", "--metadata=pagetitle:Press", str(path)], capture_output=True, text=True, check=False)
+    if result.returncode:
+        return [issue(relative, "Pandoc HTML5/MathML render failed or warned: " + result.stderr.strip())]
+    parser = HtmlCheck()
+    parser.feed(result.stdout)
+    errors = []
+    if manuscript and parser.h1 != 1:
+        errors.append(issue(relative, f"rendered HTML must contain exactly one H1, found {parser.h1}"))
+    if parser.scripts:
+        errors.append(issue(relative, "rendered HTML contains executable script"))
+    if parser.bad_imgs:
+        errors.append(issue(relative, "rendered HTML contains image without alt text"))
+    if manuscript and parser.math != expected_math:
+        errors.append(issue(relative, f"rendered MathML count {parser.math} differs from source math count {expected_math}"))
+    return errors
+
+
+def no_duplicate_keys(pairs):
+    obj = {}
+    for key, value in pairs:
+        if key in obj:
+            raise ValueError(f"duplicate JSON key: {key}")
+        obj[key] = value
+    return obj
+
+
+def validate_metadata(root: Path, rel: Path, slug: str, title: str, tracked: set[Path]) -> list[str]:
+    path = root / rel
+    if rel not in tracked:
+        return [issue(rel, "each manuscript requires tracked metadata.json")]
+    text, errors = read_text(path, rel)
+    if text is None:
+        return errors
+    try:
+        data = json.loads(text, object_pairs_hook=no_duplicate_keys, parse_constant=lambda s: (_ for _ in ()).throw(ValueError(f"nonfinite number: {s}")))
+    except (ValueError, json.JSONDecodeError) as exc:
+        return errors + [issue(rel, f"invalid JSON metadata: {exc}")]
+    if not isinstance(data, dict):
+        return errors + [issue(rel, "metadata root must be an object")]
+    unknown = data.keys() - META_KEYS
+    missing = META_KEYS - data.keys()
+    if unknown or missing:
+        errors.append(issue(rel, f"schema keys mismatch: missing {sorted(missing)}, unknown {sorted(unknown)}"))
+    for name in META_KEYS & data.keys():
+        if not isinstance(data[name], str) or not data[name].strip():
+            errors.append(issue(rel, f"{name} must be a nonempty string"))
+    if any(name not in data or not isinstance(data[name], str) for name in META_KEYS):
+        return errors
+    if data["schema"] != "press.work.v1":
+        errors.append(issue(rel, "schema must be press.work.v1"))
+    if data["slug"] != slug:
+        errors.append(issue(rel, "slug must match works/<slug>"))
+    if data["title"] != title:
+        errors.append(issue(rel, "title must exactly match the manuscript H1 plain text"))
+    if not LANGUAGE.fullmatch(data["language"]):
+        errors.append(issue(rel, "language must be lowercase ISO code optionally followed by region (e.g. en-CA)"))
+    if data["rights"] not in RIGHTS:
+        errors.append(issue(rel, "rights must be one of the enumerated rights identifiers in FORMAT.md"))
+    if data["status"] != "draft":
+        errors.append(issue(rel, "source status must remain draft; publication status belongs to releases"))
+    canonical = json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    if text != canonical:
+        errors.append(issue(rel, "metadata must be canonical JSON (sorted keys, 2-space indent, final LF)"))
+    return errors
+
+
+def validate_svg(path: Path, rel: Path) -> list[str]:
+    import xml.etree.ElementTree as ET
+    errors = []
+    raw = path.read_bytes()
+    if b"<!DOCTYPE" in raw.upper() or b"<!ENTITY" in raw.upper():
+        errors.append(issue(rel, "SVG DTD or entity declarations prohibited"))
+        return errors
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as exc:
+        return [issue(rel, f"invalid SVG XML: {exc}")]
+    if root.tag != "{http://www.w3.org/2000/svg}svg":
+        errors.append(issue(rel, "SVG root must be SVG namespace <svg>"))
+    for node in root.iter():
+        kind = node.tag.split("}")[-1].lower() if isinstance(node.tag, str) else ""
+        if kind in {"script", "foreignobject", "style", "image", "use", "a"}:
+            errors.append(issue(rel, f"SVG element <{kind}> is not permitted by the static asset profile"))
+        for key, value in node.attrib.items():
+            name = key.split("}")[-1].lower()
+            if name.startswith("on") or name in {"style", "href"} or "url(" in value.lower():
+                errors.append(issue(rel, f"SVG attribute {name!r} is not permitted by static asset profile"))
+    return errors
+
+
+def validate_assets(root: Path, tracked: set[Path]) -> list[str]:
     errors: list[str] = []
-    metadata: dict[Path, dict] = {}
-    for rel in paths:
-        rel = Path(rel)
+    for rel in sorted(tracked):
+        parts = rel.parts
+        if len(parts) < 4 or parts[0] != "works" or parts[2] != "assets":
+            continue
+        if not WORK_SLUG.fullmatch(parts[1]):
+            errors.append(issue(rel, "invalid work slug"))
+        if not all(re.fullmatch(r"[a-z0-9][a-z0-9._-]*", part) for part in parts[3:]):
+            errors.append(issue(rel, "asset names must use lowercase ASCII letters, digits, dot, dash, underscore"))
+        path = root / rel
+        if path.is_symlink() or not path.is_file():
+            errors.append(issue(rel, "asset must be a regular file, not a symlink"))
+            continue
+        if path.stat().st_size > 10 * 1024 * 1024:
+            errors.append(issue(rel, "asset exceeds 10 MiB limit"))
+        ext = path.suffix
+        header = path.read_bytes()[:16]
+        if ext == ".svg":
+            errors.extend(validate_svg(path, rel))
+        elif ext == ".png" and not header.startswith(b"\x89PNG\r\n\x1a\n"):
+            errors.append(issue(rel, "invalid PNG file header"))
+        elif ext in {".jpg", ".jpeg"} and not header.startswith(b"\xff\xd8\xff"):
+            errors.append(issue(rel, "invalid JPEG file header"))
+        elif ext == ".webp" and not (header.startswith(b"RIFF") and header[8:12] == b"WEBP"):
+            errors.append(issue(rel, "invalid WebP file header"))
+        elif ext not in {".png", ".jpg", ".jpeg", ".webp", ".svg"}:
+            errors.append(issue(rel, f"unsupported asset extension: {ext!r}"))
+    return errors
+
+
+def validate_repository(root: Path, paths: list[Path], pandoc: str = "pandoc", *, enforce_version: bool = False) -> list[str]:
+    """Validate the tracked source snapshot; never silently ignore malformed Markdown."""
+    root = root.resolve()
+    paths = [Path(p) for p in paths]
+    tracked = set(paths)
+    errors: list[str] = []
+    work_metadata: dict[Path, tuple[str, str]] = {}
+    asts: dict[Path, dict] = {}
+    ids: dict[Path, set[str]] = {}
+    expected_math: dict[Path, int] = {}
+    manuscripts: set[Path] = set()
+
+    try:
+        version = subprocess.run([pandoc, "--version"], capture_output=True, text=True, check=False)
+    except OSError:
+        return ["pandoc: compiler not available"]
+    if version.returncode:
+        return ["pandoc: compiler not available"]
+    expected = "3.12.1"
+    if enforce_version and not version.stdout.startswith(f"pandoc {expected}\n"):
+        return [f"Pandoc version mismatch: expected {expected}, got {version.stdout.splitlines()[0]}"]
+
+    for rel in sorted(paths):
+        if rel.parts and rel.parts[0] == "works":
+            if len(rel.parts) == 2 and rel.name == "README.md":
+                pass
+            elif len(rel.parts) >= 3:
+                if not WORK_SLUG.fullmatch(rel.parts[1]):
+                    errors.append(issue(rel, "work directory must use a lowercase ASCII slug"))
+                allowed_root = len(rel.parts) == 3 and rel.parts[2] in {"README.md", "metadata.json", "manuscript.md"}
+                allowed_asset = len(rel.parts) >= 4 and rel.parts[2] == "assets"
+                if not (allowed_root or allowed_asset):
+                    errors.append(issue(rel, "unsupported file path under works/ (requires policy change)"))
+            else:
+                errors.append(issue(rel, "unexpected source directly beneath works/"))
         if rel.suffix.lower() not in SOURCE_EXTENSIONS:
             continue
         path = root / rel
         if not path.is_file():
-            errors.append(report(rel, "tracked Markdown source does not exist"))
+            errors.append(issue(rel, "tracked Markdown source is missing"))
             continue
-        manuscript = len(rel.parts) == 3 and rel.parts[0] == "works" and rel.parts[2] == "manuscript.md"
-        if manuscript and not SLUG.fullmatch(rel.parts[1]):
-            errors.append(report(rel, "work slug must be lowercase hyphen-separated ASCII"))
-        source, explicit_ids, text_errors = validate_text(rel, path.read_bytes(), manuscript)
-        errors.extend(text_errors)
+        source, e = read_text(path, rel)
+        errors.extend(e)
         if source is None:
             continue
-        ast, parse_errors = pandoc_ast(path, pandoc)
-        errors.extend(parse_errors)
+        manuscript = len(rel.parts) == 3 and rel.parts[0] == "works" and rel.name == "manuscript.md"
+        info = None
+        if manuscript:
+            manuscripts.add(rel)
+            slug = rel.parts[1]
+            if not WORK_SLUG.fullmatch(slug):
+                errors.append(issue(rel, "invalid work slug"))
+            info, e = inspect_manuscript_syntax(rel, source)
+            errors.extend(e)
+        ast, e = parse_document(path, rel)
+        errors.extend(e)
         if ast is None:
             continue
-        headers = [node for node in walk(ast.get("blocks", [])) if node.get("t") == "Header"]
-        heading_ids = {node["c"][1][0] for node in headers if node.get("c")}
-        metadata[rel] = {"ast": ast, "ids": explicit_ids | heading_ids}
+        asts[rel] = ast
+        headers = [node for node in walk(ast.get("blocks", [])) if node["t"] == "Header"]
+        headings = [node["c"][1][0] for node in headers]
+        if len(headings) != len(set(headings)):
+            errors.append(issue(rel, "duplicate rendered heading IDs"))
+        explicit = set(info["anchors"]) if info else set()
+        ids[rel] = set(headings) | explicit
         if manuscript:
-            detected = sum(1 for _, line in visible_lines(source) if ATX_HEADING.match(line))
-            if detected != len(headers):
-                errors.append(report(rel, "use only ATX-style headings (#); renderer found a different heading count"))
-        # Verify every source can be compiled into semantic HTML/MathML.
-        render = subprocess.run(
-            [pandoc, "--from", PANDOC_READER, "--to", "html5", "--standalone", "--mathml", "-o", "/dev/null", str(path)],
-            capture_output=True, text=True, check=False,
-        )
-        if render.returncode:
-            errors.append(report(rel, "HTML/MathML render failed: " + render.stderr.strip()))
+            if len(headers) != len(info["headings"]):
+                errors.append(issue(rel, "Pandoc headings differ from ATX source headings (Setext/nested headings prohibited)"))
+            for (number, level, _), node in zip(info["headings"], headers):
+                if node["c"][0] != level:
+                    errors.append(issue(rel, "heading levels differ between source and AST", number))
+            if set(headings) & explicit:
+                errors.append(issue(rel, "explicit stable anchors collide with rendered header IDs"))
+            if headers:
+                title = plain_text(headers[0]["c"][2])
+                work_metadata[rel.parent / "metadata.json"] = (rel.parts[1], title)
+            raw_nodes = [node["c"][1] for node in walk(ast.get("blocks", []))
+                         if node.get("t") in ("RawInline", "RawBlock") and node.get("c", [None])[0] == "html"]
+            expected_raw = []
+            for _, line in visible_lines(source)[0]:
+                match = ANCHOR.fullmatch(line)
+                if match:
+                    expected_raw.extend([f'<a id="{match.group(1)}">', '</a>'])
+            if sorted(raw_nodes) != sorted(expected_raw):
+                errors.append(issue(rel, "raw HTML is prohibited except standalone stable section anchors"))
+            maths = [node for node in walk(ast.get("blocks", [])) if node["t"] == "Math"]
+            found_inline = sum(1 for m in maths if m["c"][0]["t"] == "InlineMath")
+            found_display = sum(1 for m in maths if m["c"][0]["t"] == "DisplayMath")
+            if (found_inline, found_display) != (info["inline_math"], info["display_math"]):
+                errors.append(issue(rel, f"math delimiters did not parse exactly: expected "
+                                         f"{info['inline_math']} inline/{info['display_math']} display, "
+                                         f"got {found_inline} inline/{found_display} display"))
+            found_notes = sum(1 for node in walk(ast.get("blocks", [])) if node["t"] == "Note")
+            if found_notes != info["footnote_refs"]:
+                errors.append(issue(rel, "footnote markers did not parse as expected"))
+            expected_math[rel] = len(maths)
+        errors.extend(render_html(path, rel, expected_math.get(rel, 0), manuscript))
 
-    for rel, info in metadata.items():
-        for node in walk(info["ast"].get("blocks", [])):
-            kind = node.get("t")
-            if kind not in ("Link", "Image"):
+    for rel, ast in asts.items():
+        manuscript = rel in manuscripts
+        for node in walk(ast.get("blocks", [])):
+            if node.get("t") not in {"Link", "Image"}:
                 continue
-            content = node.get("c", [])
-            if len(content) < 3:
+            kind = node["t"]
+            data = node["c"]
+            if len(data) < 3:
                 continue
-            if kind == "Image" and not inline_text(content[1]).strip():
-                errors.append(report(rel, "image is missing alt text"))
-            target = content[2][0]
-            url = urlsplit(target)
-            if url.scheme or url.netloc or url.path.startswith("/"):
-                continue  # External or site-root link; offline check cannot confirm it.
-            if not url.path and not url.fragment:
+            target = data[2][0]
+            if kind == "Image" and not plain_text(data[1]).strip():
+                errors.append(issue(rel, "image alt text required"))
+            parsed = urlsplit(target)
+            if parsed.scheme or parsed.netloc:
+                if parsed.scheme.lower() not in {"https", "mailto"} or (kind == "Image" and manuscript):
+                    errors.append(issue(rel, f"unsupported/external URI in {kind}: {target}"))
                 continue
-            file_path = unquote(url.path)
-            destination = (root / rel.parent / file_path).resolve() if file_path else (root / rel).resolve()
+            if target.startswith("/") or target.startswith("\\"):
+                errors.append(issue(rel, f"root-absolute path prohibited: {target}"))
+                continue
+            if parsed.query:
+                errors.append(issue(rel, f"local links may not have query strings: {target}"))
+            if not parsed.path and not parsed.fragment:
+                continue
+            destination = ((root / rel.parent / unquote(parsed.path)) if parsed.path else (root / rel)).resolve()
             try:
                 dest_rel = destination.relative_to(root)
             except ValueError:
-                errors.append(report(rel, f"link escapes repository: {target}"))
+                errors.append(issue(rel, f"link escapes repository: {target}"))
                 continue
             if not destination.exists():
-                errors.append(report(rel, f"broken local link: {target}"))
+                errors.append(issue(rel, f"broken local link: {target}"))
                 continue
-            if url.fragment and dest_rel in metadata:
-                fragment = unquote(url.fragment)
-                if fragment not in metadata[dest_rel]["ids"]:
-                    errors.append(report(rel, f"unresolved Markdown section link: {target}"))
-    return errors
+            if dest_rel not in tracked and destination.is_file():
+                errors.append(issue(rel, f"linked file is not tracked: {target}"))
+            if kind == "Image" and manuscript:
+                if len(dest_rel.parts) < 4 or dest_rel.parts[:3] != ("works", rel.parts[1], "assets"):
+                    errors.append(issue(rel, f"manuscript images must be under works/{rel.parts[1]}/assets/: {target}"))
+            if parsed.fragment and dest_rel in asts and unquote(parsed.fragment) not in ids.get(dest_rel, set()):
+                errors.append(issue(rel, f"unresolved Markdown section link: {target}"))
+            if parsed.fragment and dest_rel.suffix.lower() in SOURCE_EXTENSIONS and dest_rel not in asts:
+                errors.append(issue(rel, f"cannot validate fragment in unparsable Markdown: {target}"))
+
+    for rel, (slug, title) in work_metadata.items():
+        errors.extend(validate_metadata(root, rel, slug, title, tracked))
+    for rel in tracked:
+        if len(rel.parts) == 3 and rel.parts[0] == "works" and rel.name == "metadata.json":
+            if rel.parent / "manuscript.md" not in manuscripts:
+                errors.append(issue(rel, "orphan metadata without works/<slug>/manuscript.md"))
+    errors.extend(validate_assets(root, tracked))
+    return sorted(set(errors))
 
 
-def git_markdown_paths(root: Path) -> list[Path]:
+def git_sources(root: Path) -> list[Path]:
     result = subprocess.run(["git", "ls-files", "-z"], cwd=root, capture_output=True, check=True)
-    return sorted(Path(p.decode("utf-8")) for p in result.stdout.split(b"\0") if p and Path(p.decode("utf-8")).suffix.lower() in SOURCE_EXTENSIONS)
+    return [Path(b.decode("utf-8")) for b in result.stdout.split(b"\0") if b]
 
 
 def main() -> int:
     root = Path(__file__).resolve().parents[1]
-    paths = git_markdown_paths(root)
+    paths = git_sources(root)
     if not paths:
-        print("ERROR: No tracked Markdown sources found.", file=sys.stderr)
+        print("FAIL: no tracked sources", file=sys.stderr)
         return 1
-    errors = validate_repository(root, paths)
+    errors = validate_repository(root, paths, enforce_version=True)
     if errors:
         for error in errors:
             print("ERROR:", error, file=sys.stderr)
-        print(f"Source validation FAILED: {len(errors)} problem(s) in {len(paths)} Markdown files.", file=sys.stderr)
+        print(f"Source policy FAILED: {len(errors)} violation(s)", file=sys.stderr)
         return 1
-    print(f"Source validation passed: {len(paths)} tracked Markdown files checked (UTF-8/NFC, structure, local links, GFM, HTML/MathML).")
+    print(f"Source policy passed: {len(paths)} tracked paths checked")
     return 0
 
 

@@ -1,10 +1,8 @@
-# [Working title]
+# Sample Work
 
-*Draft — not an official edition*
-
-[Begin the manuscript here.]
+*Draft — not an official edition.*
 
 <a id="sec-1"></a>
-## § 1 — [Section title]
+## § 1 — Foundations
 
-[Continue the manuscript. See FORMAT.md for source conventions.]
+Begin the manuscript here. The source must match `metadata.json` and follow [`FORMAT.md`](../../FORMAT.md).

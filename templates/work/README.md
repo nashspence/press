@@ -1,18 +1,7 @@
-# [Working title]
+# Sample Work
 
-- **Slug:** `[work-slug]`
-- **Author:** nashspence
-- **Status:** Draft — not an official edition
-- **Rights:** All rights reserved unless expressly stated otherwise
+This is a working manuscript template, **not an official edition**.
 
-## About
+To start a new work, copy the contents of this directory into `works/<your-slug>/` and update the `slug` and `title` fields in `metadata.json` alongside the H1 title in `manuscript.md`.
 
-[Brief description, genre, or abstract.]
-
-## Source
-
-The working manuscript is in [manuscript.md](manuscript.md). Public source commits are not official editions; see [the publication protocol](../../PUBLICATION.md).
-
-## Editorial notes
-
-[Optional development notes, references, changelog, or known open questions.]
+The manuscript should follow [FORMAT.md](../../FORMAT.md). Source commits are drafts; only qualifying published GitHub Releases are official editions under [PUBLICATION.md](../../PUBLICATION.md).
