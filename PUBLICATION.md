@@ -55,4 +55,4 @@ Unreleased material in a public repository can be seen, copied, or archived. Jou
 
 ## Source compliance
 
-Manuscript sources **must** follow [FORMAT.md](FORMAT.md), including canonical work metadata, and pass the **Validate manuscript sources** check at the reviewed revision before being tagged for publication. This is an editorial requirement in this protocol; the repository still needs an active branch ruleset to enforce merges, and a separate release gate for pre-publication enforcement. The post-publication release checker cannot prevent a release.
+Manuscript sources **must** follow [FORMAT.md](FORMAT.md), including the required in-manuscript YAML front matter, and pass the **Validate manuscript sources** check at the reviewed revision before being tagged for publication. This is an editorial requirement in this protocol; the repository still needs an active branch ruleset to enforce merges, and a separate release gate for pre-publication enforcement. The post-publication release checker cannot prevent a release.

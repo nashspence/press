@@ -1,6 +1,6 @@
 """Positive/negative executable tests for Press source format v1."""
 
-import json
+import yaml
 import sys
 import tempfile
 import unittest
@@ -28,16 +28,17 @@ class StrictSourceTests(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
         self.source = Path("works/sample/manuscript.md")
-        self.meta = Path("works/sample/metadata.json")
         (self.root / self.source.parent).mkdir(parents=True)
 
-    def check(self, source=MANUSCRIPT, metadata=METADATA, other=None):
-        (self.root / self.source).write_bytes(source.encode("utf-8"))
+    def check(self, source=MANUSCRIPT, metadata=METADATA, other=None, front_matter=None):
+        if front_matter is not None:
+            prefix = front_matter
+        elif metadata is None:
+            prefix = ""
+        else:
+            prefix = "---\n" + yaml.safe_dump(metadata, allow_unicode=True, sort_keys=False) + "---\n\n"
+        (self.root / self.source).write_bytes((prefix + source).encode("utf-8"))
         paths = [self.source]
-        if metadata is not None:
-            raw = (json.dumps(metadata, sort_keys=True, indent=2, ensure_ascii=False) + "\n")
-            (self.root / self.meta).write_text(raw, encoding="utf-8")
-            paths.append(self.meta)
         for name, content in (other or {}).items():
             path = Path(name)
             dest = self.root / path
@@ -53,6 +54,12 @@ class StrictSourceTests(unittest.TestCase):
     def test_canonical_example(self):
         self.assertEqual([], self.check())
 
+    def test_plain_document_without_yaml_renders(self):
+        self.check()
+        notes = Path("notes.md")
+        (self.root / notes).write_text("# Notes\n\nOrdinary Markdown.\n", encoding="utf-8")
+        self.assertEqual([], validate_repository(self.root, [self.source, notes]))
+
     def test_notes_and_gfm_table(self):
         content = MANUSCRIPT + "A note[^ref].\n\n[^ref]: Context.\n\n| A | B |\n|---|---|\n| 1 | 2 |\n"
         self.assertEqual([], self.check(content))
@@ -60,10 +67,11 @@ class StrictSourceTests(unittest.TestCase):
     def test_invalid_utf8(self):
         self.check()
         (self.root / self.source).write_bytes(b"\xff# Title\n")
-        self.assertIn("UTF-8", " ".join(validate_repository(self.root, [self.source, self.meta])))
+        self.assertIn("UTF-8", " ".join(validate_repository(self.root, [self.source])))
 
     def test_bom(self):
-        self.assert_bad("BOM", "\ufeff" + MANUSCRIPT)
+        front = "\ufeff---\n" + yaml.safe_dump(METADATA, sort_keys=False) + "---\n\n"
+        self.assertTrue(any("BOM" in e for e in self.check(front_matter=front)))
 
     def test_nfc(self):
         self.assert_bad("NFC", MANUSCRIPT.replace("Identity", "Identite\u0301"))
@@ -175,7 +183,7 @@ class StrictSourceTests(unittest.TestCase):
         self.assert_bad("SVG element", source, other=other)
 
     def test_requires_metadata(self):
-        self.assert_bad("requires tracked metadata.json", metadata=None)
+        self.assert_bad("requires YAML front matter", metadata=None)
 
     def test_metadata_schema(self):
         self.assert_bad("schema keys mismatch", metadata={**METADATA, "extra": "unexpected"})
@@ -196,10 +204,82 @@ class StrictSourceTests(unittest.TestCase):
         content = MANUSCRIPT + '````\n<a id="fake"></a>\n## Not a section\n````\n'
         self.assertEqual([], self.check(content))
 
-    def test_noncanonical_metadata(self):
-        self.check()
-        (self.root / self.meta).write_text(json.dumps(METADATA, indent=4) + "\n", encoding="utf-8")
-        self.assertIn("canonical JSON", " ".join(validate_repository(self.root, [self.source, self.meta])))
+    def test_yaml_duplicate_key(self):
+        front = "---\n" + yaml.safe_dump(METADATA, sort_keys=False) + "title: Duplicate\n---\n\n"
+        self.assertTrue(any("duplicate YAML key" in e for e in self.check(front_matter=front)))
+
+    def test_yaml_custom_tag(self):
+        front = "---\n" + yaml.safe_dump(METADATA, sort_keys=False).replace(
+            "title: On Structure and Identity", "title: !my-tag On Structure and Identity") + "---\n\n"
+        self.assertTrue(any("prohibited" in e for e in self.check(front_matter=front)))
+
+    def test_yaml_alias_and_anchor(self):
+        front = "---\n" + yaml.safe_dump(METADATA, sort_keys=False).replace(
+            "author: nashspence", "author: &alias nashspence").replace(
+            "title: On Structure and Identity", "title: *alias") + "---\n\n"
+        self.assertTrue(any("prohibited" in e for e in self.check(front_matter=front)))
+
+    def test_yaml_merge_key(self):
+        front = "---\n" + yaml.safe_dump(METADATA, sort_keys=False) + "<<: *not-defined\n---\n\n"
+        self.assertTrue(any("prohibited" in e or "invalid YAML" in e for e in self.check(front_matter=front)))
+
+    def test_yaml_list_type(self):
+        front = "---\n" + yaml.safe_dump(METADATA, sort_keys=False).replace(
+            "author: nashspence", "author: [Nash, Spence]") + "---\n\n"
+        self.assertTrue(any("string scalar" in e for e in self.check(front_matter=front)))
+
+    def test_yaml_boolean_must_be_quoted(self):
+        front = "---\n" + yaml.safe_dump(METADATA, sort_keys=False).replace(
+            "author: nashspence", "author: yes") + "---\n\n"
+        self.assertTrue(any("quote ambiguous" in e for e in self.check(front_matter=front)))
+
+    def test_yaml_numbers_must_be_quoted(self):
+        front = "---\n" + yaml.safe_dump(METADATA, sort_keys=False).replace(
+            "author: nashspence", "author: 2026") + "---\n\n"
+        self.assertTrue(any("quote ambiguous" in e for e in self.check(front_matter=front)))
+
+    def test_yaml_unknown_key(self):
+        self.assert_bad("schema keys mismatch", metadata={**METADATA, "date": "2026-10-29"})
+
+    def test_yaml_missing_key(self):
+        self.assert_bad("schema keys mismatch", metadata={k:v for k,v in METADATA.items() if k!="author"})
+
+    def test_yaml_multiline_scalar(self):
+        front = "---\n" + yaml.safe_dump(METADATA, sort_keys=False).replace(
+            "title: On Structure and Identity", "title: |\n  On Structure and Identity") + "---\n\n"
+        self.assertTrue(any("multiline" in e or "flat single-line" in e for e in self.check(front_matter=front)))
+
+    def test_yaml_invalid_syntax(self):
+        front = "---\n" + yaml.safe_dump(METADATA, sort_keys=False).replace(
+            "author: nashspence", "author: [") + "---\n\n"
+        self.assertTrue(any("invalid YAML" in e for e in self.check(front_matter=front)))
+
+    def test_unclosed_front_matter(self):
+        self.assertTrue(any("missing closing" in e for e in self.check(front_matter="---\nschema: press.work.v1\n")))
+
+    def test_front_matter_requires_blank_separator(self):
+        front = "---\n" + yaml.safe_dump(METADATA, sort_keys=False) + "---\n"
+        self.assertTrue(any("blank line" in e for e in self.check(front_matter=front)))
+
+    def test_yaml_quotes_colon_and_comment(self):
+        title = "On Structure: Identity"
+        front = "---\n" + yaml.safe_dump({**METADATA, "title": title}, sort_keys=False)
+        front += "# This is an author comment.\n---\n\n"
+        body = MANUSCRIPT.replace("On Structure and Identity", title)
+        self.assertEqual([], self.check(body, front_matter=front))
+
+    def test_yaml_metadata_with_markdown_interpretation_disallowed(self):
+        front = "---\n" + yaml.safe_dump(METADATA, sort_keys=False).replace(
+            "author: nashspence", 'author: "*nashspence*"') + "---\n\n"
+        self.assertTrue(any("Pandoc metadata differs" in e for e in self.check(front_matter=front)))
+
+    def test_old_json_metadata_not_allowed(self):
+        self.assert_bad("unsupported file path", other={"works/sample/metadata.json": "{}\n"})
+
+    def test_work_directory_requires_manuscript(self):
+        (self.root / self.source.parent / "README.md").write_text("# Notes\n", encoding="utf-8")
+        errors = validate_repository(self.root, [Path("works/sample/README.md")])
+        self.assertTrue(any("requires manuscript.md" in e for e in errors))
 
 
 if __name__ == "__main__":

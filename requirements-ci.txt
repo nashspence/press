@@ -1,0 +1,2 @@
+# Strict YAML scalar checking used by the executable source format.
+PyYAML==6.0.3

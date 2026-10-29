@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import html.parser
 import json
+import yaml
 import re
 import subprocess
 import sys
@@ -16,7 +17,7 @@ import unicodedata
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-FORMAT = "gfm+tex_math_dollars+raw_html"
+FORMAT = "gfm+tex_math_dollars+raw_html+yaml_metadata_block"
 SOURCE_EXTENSIONS = {".md", ".markdown"}
 WORK_SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 ANCHOR = re.compile(r'<a id="([a-z][a-z0-9]*(?:-[a-z0-9]+)*)"></a>\Z')
@@ -61,14 +62,14 @@ def read_text(path: Path, relative: Path) -> tuple[str | None, list[str]]:
     return text, errors
 
 
-def visible_lines(source: str) -> tuple[list[tuple[int, str]], list[str]]:
+def visible_lines(source: str, first_line: int = 1) -> tuple[list[tuple[int, str]], list[str]]:
     """Hide fenced code, indented code and display math; retain source line numbers."""
     lines: list[tuple[int, str]] = []
     errors: list[str] = []
     fence: str | None = None
     fence_size = 0
     math_start: int | None = None
-    for number, line in enumerate(source.splitlines(), 1):
+    for number, line in enumerate(source.splitlines(), first_line):
         if fence:
             if re.fullmatch(r" {0,3}" + re.escape(fence) + "{" + str(fence_size) + r",}[ \t]*", line):
                 fence = None
@@ -139,9 +140,9 @@ def unescaped_positions(line: str, character: str) -> list[int]:
     return positions
 
 
-def inspect_manuscript_syntax(relative: Path, source: str) -> tuple[dict, list[str]]:
+def inspect_manuscript_syntax(relative: Path, source: str, first_line: int = 1) -> tuple[dict, list[str]]:
     errors: list[str] = []
-    lines, block_errors = visible_lines(source)
+    lines, block_errors = visible_lines(source, first_line)
     errors.extend(issue(relative, message) for message in block_errors)
     headings: list[tuple[int, int, str]] = []
     anchors: dict[str, int] = {}
@@ -293,9 +294,13 @@ class HtmlCheck(html.parser.HTMLParser):
 
 
 def render_html(path: Path, relative: Path, expected_math: int, manuscript: bool) -> list[str]:
+    # YAML title metadata can add a second visible H1 in Pandoc's default
+    # standalone template. Suppress only that extra title block for manuscripts;
+    # ordinary Markdown documents still need a deterministic HTML <title>.
+    title_args = ["--variable=title:"] if manuscript else ["--metadata=pagetitle:Press"]
     result = subprocess.run([
         "pandoc", "--fail-if-warnings", "--from", FORMAT, "--to", "html5", "--standalone",
-        "--mathml", "--metadata=pagetitle:Press", str(path)], capture_output=True, text=True, check=False)
+        "--mathml", *title_args, str(path)], capture_output=True, text=True, check=False)
     if result.returncode:
         return [issue(relative, "Pandoc HTML5/MathML render failed or warned: " + result.stderr.strip())]
     parser = HtmlCheck()
@@ -312,52 +317,115 @@ def render_html(path: Path, relative: Path, expected_math: int, manuscript: bool
     return errors
 
 
-def no_duplicate_keys(pairs):
-    obj = {}
-    for key, value in pairs:
-        if key in obj:
-            raise ValueError(f"duplicate JSON key: {key}")
-        obj[key] = value
-    return obj
+def validate_front_matter(relative: Path, source: str) -> tuple[dict | None, str, int, list[str]]:
+    """Read a single flat YAML metadata mapping followed by Markdown body.
 
+    Restriction to single-line, string-valued keys prevents YAML features from
+    creating meaning invisible in the manuscript or the Pandoc interpretation.
+    """
+    errors: list[str] = []
+    if not source.startswith("---\n"):
+        return None, source, 1, [issue(relative, "manuscript requires YAML front matter beginning with --- on line 1")]
+    lines = source.splitlines(keepends=True)
+    close = next((i for i in range(1, len(lines)) if lines[i] == "---\n"), None)
+    if close is None:
+        return None, source, 1, [issue(relative, "YAML front matter missing closing --- delimiter")]
+    if close > 128:
+        errors.append(issue(relative, "front matter exceeds 128 lines"))
+    metadata_source = "".join(lines[1:close])
+    body = "".join(lines[close + 1:])
+    body_line = close + 2
+    if not body.startswith("\n"):
+        errors.append(issue(relative, "require a blank line after closing front matter delimiter", close + 1))
+    if not body.strip():
+        errors.append(issue(relative, "manuscript body cannot be empty"))
 
-def validate_metadata(root: Path, rel: Path, slug: str, title: str, tracked: set[Path]) -> list[str]:
-    path = root / rel
-    if rel not in tracked:
-        return [issue(rel, "each manuscript requires tracked metadata.json")]
-    text, errors = read_text(path, rel)
-    if text is None:
-        return errors
+    for number, line in enumerate(lines[1:close], start=2):
+        raw_line = line.removesuffix("\n")
+        if not raw_line.strip() or raw_line.startswith("#"):
+            continue
+        # A deliberately restricted *subset* of YAML: one plain key/scalar per line.
+        # Quoted string values, Unicode and comments remain available to authors.
+        if not re.fullmatch(r"[a-z][a-z0-9_-]*:[ \t]+.+", raw_line):
+            errors.append(issue(relative, "front matter must use flat single-line key: string mappings", number))
+
+    forbidden = (yaml.tokens.AnchorToken, yaml.tokens.AliasToken,
+                 yaml.tokens.TagToken, yaml.tokens.DirectiveToken,
+                 yaml.tokens.FlowMappingStartToken, yaml.tokens.FlowSequenceStartToken,
+                 yaml.tokens.BlockSequenceStartToken)
     try:
-        data = json.loads(text, object_pairs_hook=no_duplicate_keys, parse_constant=lambda s: (_ for _ in ()).throw(ValueError(f"nonfinite number: {s}")))
-    except (ValueError, json.JSONDecodeError) as exc:
-        return errors + [issue(rel, f"invalid JSON metadata: {exc}")]
-    if not isinstance(data, dict):
-        return errors + [issue(rel, "metadata root must be an object")]
+        tokens = list(yaml.scan(metadata_source))
+        for token in tokens:
+            if isinstance(token, forbidden):
+                errors.append(issue(relative, f"YAML aliases, anchors, tags, directives and collections are prohibited: {type(token).__name__}"))
+            if isinstance(token, yaml.tokens.ScalarToken) and token.style in ("|", ">"):
+                errors.append(issue(relative, "YAML folded and literal multiline scalars are prohibited"))
+        root = yaml.compose(metadata_source, Loader=yaml.SafeLoader)
+    except yaml.YAMLError as exc:
+        return None, body, body_line, errors + [issue(relative, f"invalid YAML front matter: {exc}")]
+    if not isinstance(root, yaml.nodes.MappingNode):
+        return None, body, body_line, errors + [issue(relative, "front matter must contain one mapping")]
+    data: dict[str, str] = {}
+    string_tag = "tag:yaml.org,2002:str"
+    for key_node, value_node in root.value:
+        if not isinstance(key_node, yaml.nodes.ScalarNode) or key_node.tag != string_tag:
+            errors.append(issue(relative, "front matter keys must be literal string identifiers"))
+            continue
+        key = key_node.value
+        if key in data:
+            errors.append(issue(relative, f"duplicate YAML key: {key}"))
+        if not isinstance(value_node, yaml.nodes.ScalarNode) or value_node.tag != string_tag:
+            errors.append(issue(relative, f"{key} must be a YAML string scalar; quote ambiguous booleans, dates, and numbers"))
+            continue
+        if "\n" in value_node.value or "\r" in value_node.value:
+            errors.append(issue(relative, f"{key} must be a single-line scalar"))
+        data[key] = value_node.value
+    return data, body, body_line, errors
+
+
+def validate_work_fields(relative: Path, data: dict, slug: str, title: str) -> list[str]:
+    errors: list[str] = []
     unknown = data.keys() - META_KEYS
     missing = META_KEYS - data.keys()
     if unknown or missing:
-        errors.append(issue(rel, f"schema keys mismatch: missing {sorted(missing)}, unknown {sorted(unknown)}"))
+        errors.append(issue(relative, f"schema keys mismatch: missing {sorted(missing)}, unknown {sorted(unknown)}"))
     for name in META_KEYS & data.keys():
         if not isinstance(data[name], str) or not data[name].strip():
-            errors.append(issue(rel, f"{name} must be a nonempty string"))
+            errors.append(issue(relative, f"{name} must be a nonempty string"))
     if any(name not in data or not isinstance(data[name], str) for name in META_KEYS):
         return errors
     if data["schema"] != "press.work.v1":
-        errors.append(issue(rel, "schema must be press.work.v1"))
+        errors.append(issue(relative, "schema must be press.work.v1"))
     if data["slug"] != slug:
-        errors.append(issue(rel, "slug must match works/<slug>"))
+        errors.append(issue(relative, "slug must match works/<slug>"))
     if data["title"] != title:
-        errors.append(issue(rel, "title must exactly match the manuscript H1 plain text"))
+        errors.append(issue(relative, "title must exactly match the manuscript H1 plain text"))
     if not LANGUAGE.fullmatch(data["language"]):
-        errors.append(issue(rel, "language must be lowercase ISO code optionally followed by region (e.g. en-CA)"))
+        errors.append(issue(relative, "language must be lowercase ISO code optionally followed by region (e.g. en-CA)"))
     if data["rights"] not in RIGHTS:
-        errors.append(issue(rel, "rights must be one of the enumerated rights identifiers in FORMAT.md"))
+        errors.append(issue(relative, "rights must be one of the enumerated rights identifiers in FORMAT.md"))
     if data["status"] != "draft":
-        errors.append(issue(rel, "source status must remain draft; publication status belongs to releases"))
-    canonical = json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    if text != canonical:
-        errors.append(issue(rel, "metadata must be canonical JSON (sorted keys, 2-space indent, final LF)"))
+        errors.append(issue(relative, "source status must remain draft; publication status belongs to releases"))
+    return errors
+
+
+def validate_pandoc_front_matter(relative: Path, data: dict, ast: dict) -> list[str]:
+    """Prevent the YAML parser and the publishing compiler from disagreeing."""
+    errors: list[str] = []
+    meta = ast.get("meta", {})
+    if set(meta) != set(data):
+        errors.append(issue(relative, "Pandoc YAML metadata keys differ from source front matter"))
+    for key in set(meta) & set(data):
+        node = meta[key]
+        if node.get("t") == "MetaInlines":
+            rendered = plain_text(node.get("c", []))
+        elif node.get("t") == "MetaString":
+            rendered = node.get("c", "")
+        else:
+            errors.append(issue(relative, f"Pandoc interpreted YAML field {key} as non-text metadata"))
+            continue
+        if rendered != data[key]:
+            errors.append(issue(relative, f"Pandoc metadata differs from YAML scalar for field {key}"))
     return errors
 
 
@@ -422,7 +490,8 @@ def validate_repository(root: Path, paths: list[Path], pandoc: str = "pandoc", *
     paths = [Path(p) for p in paths]
     tracked = set(paths)
     errors: list[str] = []
-    work_metadata: dict[Path, tuple[str, str]] = {}
+    front_matters: dict[Path, dict] = {}
+    bodies: dict[Path, tuple[str, int]] = {}
     asts: dict[Path, dict] = {}
     ids: dict[Path, set[str]] = {}
     expected_math: dict[Path, int] = {}
@@ -445,7 +514,7 @@ def validate_repository(root: Path, paths: list[Path], pandoc: str = "pandoc", *
             elif len(rel.parts) >= 3:
                 if not WORK_SLUG.fullmatch(rel.parts[1]):
                     errors.append(issue(rel, "work directory must use a lowercase ASCII slug"))
-                allowed_root = len(rel.parts) == 3 and rel.parts[2] in {"README.md", "metadata.json", "manuscript.md"}
+                allowed_root = len(rel.parts) == 3 and rel.parts[2] in {"README.md", "manuscript.md"}
                 allowed_asset = len(rel.parts) >= 4 and rel.parts[2] == "assets"
                 if not (allowed_root or allowed_asset):
                     errors.append(issue(rel, "unsupported file path under works/ (requires policy change)"))
@@ -468,7 +537,12 @@ def validate_repository(root: Path, paths: list[Path], pandoc: str = "pandoc", *
             slug = rel.parts[1]
             if not WORK_SLUG.fullmatch(slug):
                 errors.append(issue(rel, "invalid work slug"))
-            info, e = inspect_manuscript_syntax(rel, source)
+            front, body, body_line, e = validate_front_matter(rel, source)
+            errors.extend(e)
+            bodies[rel] = (body, body_line)
+            if front is not None:
+                front_matters[rel] = front
+            info, e = inspect_manuscript_syntax(rel, body, body_line)
             errors.extend(e)
         ast, e = parse_document(path, rel)
         errors.extend(e)
@@ -489,13 +563,15 @@ def validate_repository(root: Path, paths: list[Path], pandoc: str = "pandoc", *
                     errors.append(issue(rel, "heading levels differ between source and AST", number))
             if set(headings) & explicit:
                 errors.append(issue(rel, "explicit stable anchors collide with rendered header IDs"))
-            if headers:
-                title = plain_text(headers[0]["c"][2])
-                work_metadata[rel.parent / "metadata.json"] = (rel.parts[1], title)
+            if rel in front_matters:
+                front = front_matters[rel]
+                title = plain_text(headers[0]["c"][2]) if headers else ""
+                errors.extend(validate_work_fields(rel, front, rel.parts[1], title))
+                errors.extend(validate_pandoc_front_matter(rel, front, ast))
             raw_nodes = [node["c"][1] for node in walk(ast.get("blocks", []))
                          if node.get("t") in ("RawInline", "RawBlock") and node.get("c", [None])[0] == "html"]
             expected_raw = []
-            for _, line in visible_lines(source)[0]:
+            for _, line in visible_lines(*bodies[rel])[0]:
                 match = ANCHOR.fullmatch(line)
                 if match:
                     expected_raw.extend([f'<a id="{match.group(1)}">', '</a>'])
@@ -557,12 +633,10 @@ def validate_repository(root: Path, paths: list[Path], pandoc: str = "pandoc", *
             if parsed.fragment and dest_rel.suffix.lower() in SOURCE_EXTENSIONS and dest_rel not in asts:
                 errors.append(issue(rel, f"cannot validate fragment in unparsable Markdown: {target}"))
 
-    for rel, (slug, title) in work_metadata.items():
-        errors.extend(validate_metadata(root, rel, slug, title, tracked))
-    for rel in tracked:
-        if len(rel.parts) == 3 and rel.parts[0] == "works" and rel.name == "metadata.json":
-            if rel.parent / "manuscript.md" not in manuscripts:
-                errors.append(issue(rel, "orphan metadata without works/<slug>/manuscript.md"))
+    work_folders = {rel.parts[1] for rel in tracked if len(rel.parts) >= 3 and rel.parts[0] == "works"}
+    for slug in sorted(work_folders):
+        if Path("works") / slug / "manuscript.md" not in manuscripts:
+            errors.append(issue(Path("works") / slug, "work directory requires manuscript.md"))
     errors.extend(validate_assets(root, tracked))
     return sorted(set(errors))
 

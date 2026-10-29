@@ -2,6 +2,6 @@
 
 This is a working manuscript template, **not an official edition**.
 
-To start a new work, copy the contents of this directory into `works/<your-slug>/` and update the `slug` and `title` fields in `metadata.json` alongside the H1 title in `manuscript.md`.
+Copy this directory into `works/<your-slug>/`. Edit the YAML block at the beginning of `manuscript.md`: set `slug` to the folder name and keep `title` identical to the manuscript's H1. Remove or customize this README. No separate metadata file is needed.
 
-The manuscript should follow [FORMAT.md](../../FORMAT.md). Source commits are drafts; only qualifying published GitHub Releases are official editions under [PUBLICATION.md](../../PUBLICATION.md).
+The manuscript must follow [FORMAT.md](../../FORMAT.md). Source commits are drafts; only qualifying published GitHub Releases are official editions under [PUBLICATION.md](../../PUBLICATION.md).

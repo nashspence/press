@@ -19,6 +19,17 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set up pinned Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12.12'
+
+      - name: Install YAML validator dependency
+        run: python -m pip install --disable-pip-version-check --no-deps --only-binary=:all: -r requirements-ci.txt
+
+      - name: Verify YAML validator version
+        run: python -c 'import yaml; assert yaml.__version__ == "6.0.3"'
+
       - name: Install pinned Pandoc
         uses: pandoc/actions/setup@86321b6dd4675f5014c611e05088e10d4939e09e # v1
         with:
@@ -29,7 +40,7 @@ jobs:
           test "$(pandoc --version | head -n 1)" = "pandoc 3.12.1"
 
       - name: Run executable format tests
-        run: python3 -m unittest discover -s tests -v
+        run: python -m unittest discover -s tests -v
 
       - name: Enforce source format v1 on tracked tree
-        run: python3 scripts/validate_sources.py
+        run: python scripts/validate_sources.py
