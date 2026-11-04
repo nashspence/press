@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from asset_policy import AssetError
+from editorial_notices import edition_notices, release_notes, render_initial_body
 from identifier_schema import validate_registrations
 from issuance import authorization, check_issuance, public_receipt
 
@@ -21,6 +22,7 @@ class IssuanceTests(unittest.TestCase):
         self.manifest = {"title": "Example", "tag": "works/example/v1.2.0", "html_sha256": "f" * 64,
                          "source_commit": "a" * 40, "canonical_artifact": "example-v1.2.0.html",
                          "rights": "all-rights-reserved", "record_url": "https://press.example.org/works/example/v1.2.0"}
+        self.manifest["initial_release_body"] = render_initial_body(self.manifest)
         (self.package / "provenance.json").write_text(json.dumps(self.manifest) + "\n")
         self.record = authorization(self.package, self.manifest)
         self.path = Path("registrations/editions/example/v1.2.0.json")
@@ -57,10 +59,10 @@ class IssuanceTests(unittest.TestCase):
                     self.assertTrue(any(key in error for error in errors))
 
     def test_approval_digest_binds_edition_specific_rights_prose(self):
-        self.manifest["initial_notes"] = "Plate I used by permission.\n"
+        self.manifest["initial_release_body"] = render_initial_body(self.manifest, "Plate I used by permission.\n")
         self.record = authorization(self.package, self.manifest)
         self.write()
-        self.manifest["initial_notes"] = "Plate I is in the public domain.\n"
+        self.manifest["initial_release_body"] = render_initial_body(self.manifest, "Plate I is in the public domain.\n")
         with self.assertRaisesRegex(AssetError, "initial_notes_sha256 differs"):
             self.check()
 
@@ -73,9 +75,38 @@ class IssuanceTests(unittest.TestCase):
             self.check()
 
     def test_initial_prose_cannot_override_reserved_rights(self):
-        manifest = {**self.manifest, "initial_notes": "Rights: contradictory terms\n"}
         with self.assertRaisesRegex(AssetError, "reserved release field"):
-            authorization(self.package, manifest)
+            render_initial_body(self.manifest, "Rights: contradictory terms\n")
+
+    def test_new_renderer_can_still_read_and_annotate_an_old_receipt(self):
+        old_body = self.manifest["initial_release_body"]
+        self.record["published_at"] = "2026-11-04T12:00:00Z"
+        self.write()
+        with patch("editorial_notices.edition_fields", side_effect=AssertionError("re-rendered old body")):
+            self.check(require_receipt=True)
+            self.assertEqual(release_notes(self.manifest), old_body)
+            current = release_notes(self.manifest, ["- 2026-11-05 Withdrawal: See replacement."],
+                                    identifiers={"oclc": "42"})
+        self.assertTrue(current.startswith("## Editorial notices\n\n- 2026-11-05 Withdrawal: See replacement."))
+        self.assertTrue(current.endswith("## Edition identifiers\n\n- OCLC number: `42`\n\n" + old_body))
+
+    def test_cannot_authorize_edition_missing_the_literal_reviewed_body(self):
+        del self.manifest["initial_release_body"]
+        with self.assertRaisesRegex(AssetError, "exact reviewed initial release body"):
+            authorization(self.package, self.manifest)
+
+    def test_unclosed_markdown_and_false_official_sections_are_rejected(self):
+        directory = self.root / "notices/example/v1.2.0"
+        directory.mkdir(parents=True)
+        for markup in ("<!--", "<details>", "```", "~~~gfm", "## Editorial notices", "    indented code"):
+            with self.subTest(markup=markup):
+                with self.assertRaises(AssetError):
+                    render_initial_body(self.manifest, markup + "\n")
+                (directory / "0001.md").write_text("2026-11-05 Correction: " + markup + "\n")
+                with self.assertRaises(AssetError):
+                    edition_notices(self.root, self.manifest["tag"])
+        with self.assertRaises(AssetError):
+            render_initial_body(self.manifest, "Edition identifiers\n===\n")
 
     def test_record_fields_must_match_package(self):
         original = dict(self.record)
@@ -103,10 +134,12 @@ class IssuanceTests(unittest.TestCase):
     def test_receipt_comes_from_verified_public_edition(self):
         self.write()
         release = {'tag_name': self.manifest['tag'], 'published_at': '2026-11-04T12:00:00Z'}
-        with patch('publish_edition.api', return_value=release), patch('audit_assets.verify_public_release') as verify:
+        with (patch('publish_edition.api', return_value=release), patch('audit_assets.verify_public_release') as verify,
+              patch('reader_routes.verify_reader_routes') as readers):
             result = public_receipt(self.root, self.package, self.manifest, 'owner/press')
             self.assertEqual(result, {**self.record, 'published_at': release['published_at']})
             verify.assert_called_once_with('owner/press', release, root=self.root)
+            readers.assert_called_once_with(self.manifest, 'owner/press', notices=[], published_at=release['published_at'])
             verify.side_effect = AssetError('readback failed')
             with self.assertRaisesRegex(AssetError, 'readback failed'):
                 public_receipt(self.root, self.package, self.manifest, 'owner/press')

@@ -28,7 +28,7 @@ on:
 
 permissions:
   contents: read
-  checks: read
+  actions: read
 
 jobs:
   build:
@@ -174,7 +174,6 @@ jobs:
     permissions:
       actions: read
       contents: write
-      checks: read
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -201,13 +200,18 @@ jobs:
           command=download
           if [[ "$REBUILD" == true ]]; then command=verify; fi
           python scripts/reviewed_artifact.py "$command" "$STAGED_RUN_ID" "$PROVENANCE_SHA256" dist/edition
-      - name: Publish the authorized edition
+      - name: Check the staged presentation profile
         env:
           GH_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/check_profile_history.py --candidate dist/edition/provenance.json
+      - name: Promote the verified draft with a live immutability check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRESS_POLICY_READ_TOKEN: ${{ secrets.PRESS_POLICY_READ_TOKEN }}
           SOURCE_COMMIT: ${{ inputs.source_commit }}
           EDITION_TAG: ${{ inputs.edition_tag }}
         run: |
-          python scripts/check_profile_history.py --candidate dist/edition/provenance.json
           python scripts/publish_edition.py --directory dist/edition --commit "$SOURCE_COMMIT" --tag "$EDITION_TAG" --issuer-commit "$GITHUB_SHA"
       - name: Prepare the verified publication receipt
         env:
