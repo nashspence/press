@@ -87,6 +87,21 @@ class StrictSourceTests(unittest.TestCase):
         (self.root / notes).write_text("# Notes\n\nOrdinary Markdown.\n", encoding="utf-8")
         self.assertEqual([], validate_repository(self.root, [self.source, notes]))
 
+    def test_ordinary_markdown_explicit_anchor_links(self):
+        self.check()
+        notes = Path("notes.md")
+        (self.root / notes).write_text('# Notes\n\n<a id="stable-section"></a>\n## Section\n\n[Go](#stable-section)\n',
+                         encoding="utf-8")
+        self.assertEqual([], validate_repository(self.root, [self.source, notes]))
+
+    def test_ordinary_markdown_ignores_anchors_inside_code(self):
+        self.check()
+        notes = Path("notes.md")
+        (self.root / notes).write_text('# Notes\n\n```html\n<a id="not-an-anchor"></a>\n```\n\n'
+                         '[Broken](#not-an-anchor)\n', encoding="utf-8")
+        errors = validate_repository(self.root, [self.source, notes])
+        self.assertTrue(any("unresolved Markdown section link" in error for error in errors), errors)
+
     def test_notes_and_gfm_table(self):
         content = MANUSCRIPT + "A note[^ref].\n\n[^ref]: Context.\n\n| A | B |\n|---|---|\n| 1 | 2 |\n"
         self.assertEqual([], self.check(content))
