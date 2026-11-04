@@ -205,10 +205,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           python scripts/check_profile_history.py --candidate dist/edition/provenance.json
+      - name: Create a repository-scoped read-only policy token
+        id: policy-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.PRESS_POLICY_APP_CLIENT_ID }}
+          private-key: ${{ secrets.PRESS_POLICY_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-administration: read
       - name: Promote the verified draft with a live immutability check
         env:
           GH_TOKEN: ${{ github.token }}
-          PRESS_POLICY_READ_TOKEN: ${{ secrets.PRESS_POLICY_READ_TOKEN }}
+          PRESS_POLICY_READ_TOKEN: ${{ steps.policy-token.outputs.token }}
           SOURCE_COMMIT: ${{ inputs.source_commit }}
           EDITION_TAG: ${{ inputs.edition_tag }}
         run: |

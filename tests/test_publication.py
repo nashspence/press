@@ -340,6 +340,27 @@ class PublicationLifecycleTests(unittest.TestCase):
 
 
 class RequiredCheckTests(unittest.TestCase):
+    def test_policy_app_key_and_token_are_limited_to_protected_publication(self):
+        root = Path(__file__).resolve().parents[1]
+        jobs = yaml.safe_load((root / ".github/workflows/prepare-edition.yml").read_text())["jobs"]
+        release = jobs["release"]
+        self.assertEqual(release["environment"], "press-release")
+        self.assertIn("github.ref == 'refs/heads/main'", release["if"])
+        token_step = next(s for s in release["steps"] if s.get("id") == "policy-token")
+        self.assertRegex(token_step["uses"], r"^actions/create-github-app-token@[a-f0-9]{40}$")
+        inputs = token_step["with"]
+        self.assertEqual(inputs["owner"], "${{ github.repository_owner }}")
+        self.assertEqual(inputs["repositories"], "${{ github.event.repository.name }}")
+        self.assertEqual({k: v for k, v in inputs.items() if k.startswith("permission-")},
+                         {"permission-administration": "read"})
+        self.assertNotEqual(str(inputs.get("skip-token-revoke", "false")).lower(), "true")
+        promotion = next(s for s in release["steps"] if "PRESS_POLICY_READ_TOKEN" in s.get("env", {}))
+        self.assertEqual(promotion["env"]["PRESS_POLICY_READ_TOKEN"], "${{ steps.policy-token.outputs.token }}")
+        self.assertEqual(promotion["env"]["GH_TOKEN"], "${{ github.token }}")
+        for name, job in jobs.items():
+            if name != "release":
+                self.assertNotIn("PRESS_POLICY_APP_PRIVATE_KEY", json.dumps(job))
+
     def setUp(self):
         self.commit = "a" * 40
         self.repo = "owner/press"

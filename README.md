@@ -8,7 +8,7 @@ Start with the [manuscript template](templates/work/manuscript.md) at `works/<sl
 
 ## Issue an edition
 
-Before staging the first work, deploy the publisher-controlled HTTPS origin in `edition-origin.txt`. Each `/works/<slug>/vX.Y.Z` address leads to the edition record. Its `/read` address serves the authorized HTML inline. Keep control of this origin. Enable GitHub immutable releases and configure the protected `press-release` environment with `PRESS_POLICY_READ_TOKEN`, restricted to this repository with Administration read access. Promotion checks the live policy before issuing the draft.
+Before staging the first work, deploy the publisher-controlled HTTPS origin in `edition-origin.txt`. Each `/works/<slug>/vX.Y.Z` address leads to the edition record. Its `/read` address serves the authorized HTML inline. Keep control of this origin. Enable GitHub immutable releases. Install a GitHub App with only Administration read access on this repository and configure the protected `press-release` environment with its `PRESS_POLICY_APP_CLIENT_ID` variable and `PRESS_POLICY_APP_PRIVATE_KEY` secret. Promotion creates a short-lived token restricted to this repository, checks the live policy before issuing the draft, and revokes the token when the job finishes. Release writes use the built-in workflow token.
 
 The [record gateway](records/worker.js) redirects edition records to GitHub Releases and serves the matching immutable attachment for readers. Its operator deployment uses `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_ZONE_ID`. Consult `make help` for deployment arguments.
 
