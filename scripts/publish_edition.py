@@ -22,6 +22,20 @@ def gh(*args, optional=False):
     return result.stdout
 
 
+def release_records(repo):
+    # Older supported gh versions emit concatenated JSON pages without --slurp.
+    raw = gh("api", "--paginate", f"repos/{repo}/releases?per_page=100").lstrip()
+    records = []
+    decoder = json.JSONDecoder()
+    while raw:
+        page, end = decoder.raw_decode(raw)
+        if not isinstance(page, list):
+            raise AssetError("unexpected release-list response")
+        records.extend(page)
+        raw = raw[end:].lstrip()
+    return records
+
+
 def api(repo, path):
     return json.loads(gh("api", f"repos/{repo}/{path}"))
 
@@ -64,8 +78,7 @@ def stage_edition(repo, directory, commit, tag, *, publish=False):
     if resolved is not None and resolved != commit:
         raise AssetError("edition tag points at a different commit")
     # List releases through the API to distinguish missing releases from API errors.
-    releases = json.loads(gh("api", "--paginate", "--slurp", f"repos/{repo}/releases?per_page=100"))
-    matches = [release for page in releases for release in page if release["tag_name"] == tag]
+    matches = [release for release in release_records(repo) if release["tag_name"] == tag]
     if matches and (not matches[0]["draft"] or matches[0]["prerelease"]):
         raise AssetError("will not modify an issued edition or prerelease")
     names = [manifest["canonical_artifact"], "provenance.json", "SHA256SUMS"]

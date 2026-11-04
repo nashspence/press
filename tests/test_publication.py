@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import test_assets as fixtures
 from asset_policy import AssetError
-from publish_edition import require_source_check, stage_edition
+from publish_edition import release_records, require_source_check, stage_edition
 from verify_source_assets import verify_source_assets
 
 
@@ -30,7 +30,7 @@ class PublicationTests(fixtures.EditionTests):
     def fake_gh(self, *args, tamper=False):
         self.operations.append(args)
         if args[0] == "api":
-            return "[[]]"
+            return "[]"
         if args[:2] == ("release", "download"):
             name = args[args.index("--pattern") + 1]
             directory = Path(args[args.index("--dir") + 1])
@@ -89,6 +89,10 @@ class RequiredCheckTests(unittest.TestCase):
     def checks(self):
         return [{"id": i + 1, "name": name, "app": {"slug": "github-actions"}, "conclusion": "success"}
                 for i, name in enumerate(["Validate manuscript sources", "Verify manuscript assets"])]
+
+    def test_paginated_release_inventory_works_with_existing_gh(self):
+        with patch("publish_edition.gh", return_value='[{"id":1}]\n[{"id":2}]\n'):
+            self.assertEqual([{"id":1},{"id":2}], release_records("owner/press"))
 
     def test_both_checks_required_at_reviewed_commit(self):
         checks = self.checks()

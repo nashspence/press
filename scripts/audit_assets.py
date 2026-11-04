@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 
 from asset_policy import AssetError, fetch_asset, load_policy
-from publish_edition import gh, tag_commit
+from publish_edition import gh, release_records, tag_commit
 from validate_sources import git_sources, parse_document, walk
 from verify_edition import verify_edition
 
@@ -28,9 +28,8 @@ def audit(root, repo):
             if node.get("t") == "Image" and node["c"][2][0].startswith(policy.origin + "/"):
                 policy.parse(node["c"][2][0])
                 urls.add(node["c"][2][0])
-    pages = json.loads(gh("api", "--paginate", "--slurp", f"repos/{repo}/releases?per_page=100"))
     count = 0
-    for release in (release for page in pages for release in page):
+    for release in release_records(repo):
         if release["draft"] or release["prerelease"]:
             continue
         tag = release["tag_name"]
