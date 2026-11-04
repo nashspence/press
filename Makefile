@@ -1,8 +1,8 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup check check-source check-assets test image build verify authorization receipt release-notes gateway-plan gateway-deploy
+.PHONY: help setup check check-source check-assets test image build verify authorization receipt release-notes gateway-plan gateway-deploy records-plan records-deploy
 
 PYTHON := mise exec -- uv run --locked python
-export FILE DIR TAG REGISTRATION
+export FILE DIR TAG REGISTRATION RECORD_TARGET RECORD_WORKER
 
 help: ## Show this help.
 	@printf '%s\n\n' 'Usage: make <target> [NAME=value]'
@@ -22,7 +22,7 @@ check-assets: ## Download and verify referenced images.
 
 test: ## Run the Python and asset gateway test suites.
 	@$(PYTHON) -m unittest discover -s tests
-	@mise exec -- node --test tests/test_worker.mjs
+	@mise exec -- node --test tests/test*worker.mjs
 
 image: ## FILE=figure.svg  Print the upload key, headers, and manuscript URL.
 	@$(PYTHON) scripts/prepare_asset.py -- "$${FILE:?Set FILE to the image path}"
@@ -49,3 +49,9 @@ gateway-plan: ## Preview the asset gateway deployment.
 
 gateway-deploy: ## Apply the asset gateway deployment to Cloudflare.
 	@$(PYTHON) scripts/deploy_asset_gateway.py --apply
+
+records-plan: ## [RECORD_TARGET=https://archive/base] [RECORD_WORKER=press-records]  Preview edition-record routing.
+	@$(PYTHON) scripts/deploy_record_gateway.py
+
+records-deploy: ## Apply edition-record routing and its Cloudflare TLS Custom Domain. Same arguments as records-plan.
+	@$(PYTHON) scripts/deploy_record_gateway.py --apply
