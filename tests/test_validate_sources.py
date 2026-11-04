@@ -2,13 +2,14 @@
 
 import yaml
 import json
+import hashlib
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from validate_sources import validate_repository  # noqa: E402
+from validate_sources import parse_document, validate_repository, walk  # noqa: E402
 
 
 MANUSCRIPT = ("# On Structure and Identity\n\n"
@@ -56,11 +57,29 @@ class StrictSourceTests(unittest.TestCase):
         self.assertEqual([], self.check())
 
     def test_starter_manuscript(self):
-        template = Path(__file__).resolve().parents[1] / "templates/work/manuscript.md"
+        repository = Path(__file__).resolve().parents[1]
         source = Path("works/sample-work/manuscript.md")
         (self.root / source.parent).mkdir(parents=True)
-        (self.root / source).write_bytes(template.read_bytes())
+        (self.root / source).write_bytes((repository / "templates/work/manuscript.md").read_bytes())
+        (self.root / "asset-policy.json").write_bytes((repository / "asset-policy.json").read_bytes())
         self.assertEqual([], validate_repository(self.root, [source]))
+
+        ast, errors = parse_document(self.root / source, source)
+        self.assertEqual([], errors)
+        nodes = list(walk(ast["blocks"]))
+        kinds = {node["t"] for node in nodes}
+        self.assertTrue({"Header", "Strong", "Emph", "Strikeout", "Code", "CodeBlock",
+                         "BulletList", "OrderedList", "BlockQuote", "Table", "Note",
+                         "Image", "Link", "Math"} <= kinds)
+        self.assertEqual([1, 2, 3, 3, 4, 2, 2],
+                         [node["c"][0] for node in nodes if node["t"] == "Header"])
+        self.assertEqual(["InlineMath", "DisplayMath", "InlineMath"],
+                         [node["c"][0]["t"] for node in nodes if node["t"] == "Math"])
+
+        preview = (repository / "storage/preview.svg").read_bytes()
+        origin = json.loads((repository / "asset-policy.json").read_text())["origin"]
+        expected = f"{origin}/sha256/{hashlib.sha256(preview).hexdigest()}.svg"
+        self.assertEqual([expected], [node["c"][2][0] for node in nodes if node["t"] == "Image"])
 
     def test_plain_document_without_yaml_renders(self):
         self.check()
