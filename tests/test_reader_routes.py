@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from asset_policy import AssetError
-from reader_routes import verify_reader_routes
+from reader_routes import require_redirect, verify_reader_routes
 
 
 class ReaderRouteTests(unittest.TestCase):
@@ -101,3 +101,19 @@ class ReaderRouteTests(unittest.TestCase):
         self.page += f'<time datetime="{timestamp}">1 November</time>'
         self.check(archive_base=self.target, published_at=timestamp)
         self.assertTrue(self.calls[-1].startswith(self.target))
+
+
+class RedirectDiagnosticTests(unittest.TestCase):
+    def test_denial_keeps_only_status_challenge_and_numeric_code(self):
+        @contextmanager
+        def denied(*args, **kwargs):
+            response = io.BytesIO(b'<h1>Error 1010</h1><p>private request details</p>')
+            response.status = 403
+            response.getheader = {'cf-mitigated': 'challenge'}.get
+            yield response
+        with patch('reader_routes.public_response', denied):
+            with self.assertRaises(AssetError) as caught:
+                require_redirect('https://press.test/record', 'https://archive.test/record')
+        message = str(caught.exception)
+        self.assertIn('HTTP 403; intermediary challenge; intermediary error 1010', message)
+        self.assertNotIn('private request details', message)

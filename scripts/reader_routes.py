@@ -77,7 +77,18 @@ class RecordText(HTMLParser):
 def require_redirect(url, expected):
     with public_response(url, 'text/html') as response:
         if response.status not in {302, 307} or response.getheader('Location') != expected:
-            raise AssetError(f'{url}: expected a temporary redirect to {expected} (HTTP {response.status})')
+            details = [f'HTTP {response.status}']
+            if response.getheader('cf-mitigated') == 'challenge':
+                details.append('intermediary challenge')
+            if response.status == 403:
+                # Retain a numeric denial code without copying an intermediary's page,
+                # which can contain request details. Bound the diagnostic read.
+                denied = RecordText()
+                denied.feed(response.read(16384).decode('utf-8', errors='replace'))
+                code = re.search(r'\b(?:Error|error code:)\s*(1[0-9]{3})\b', ''.join(denied.text))
+                if code:
+                    details.append('intermediary error ' + code[1])
+            raise AssetError(f'{url}: expected a temporary redirect to {expected} ({"; ".join(details)})')
 
 
 def require_html(response, url):
