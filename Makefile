@@ -1,8 +1,8 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup check check-source check-assets test image build verify authorization release-notes gateway-plan gateway-deploy
+.PHONY: help setup check check-source check-assets test image build verify authorization receipt release-notes gateway-plan gateway-deploy
 
 PYTHON := mise exec -- uv run --locked python
-export FILE DIR TAG
+export FILE DIR TAG REGISTRATION
 
 help: ## Show this help.
 	@printf '%s\n\n' 'Usage: make <target> [NAME=value]'
@@ -31,13 +31,17 @@ build: ## TAG=works/essay/v1.0.0  Build a local edition from HEAD into dist/<tag
 	@$(PYTHON) scripts/build_edition.py --commit "$$(git rev-parse HEAD)" \
 		--tag "$${TAG:?Set TAG to the intended edition tag}" --output "dist/$$TAG"
 
-verify: ## DIR=path/to/edition  Verify a downloaded or locally built edition offline.
-	@$(PYTHON) scripts/verify_edition.py -- "$${DIR:?Set DIR to the edition directory}"
+verify: ## DIR=path/to/edition [REGISTRATION=trusted.json]  Verify the package and optionally its authorization offline.
+	@set --; if [ -n "$$REGISTRATION" ]; then set -- "--registration=$$REGISTRATION"; fi; \
+		$(PYTHON) scripts/verify_edition.py "$$@" -- "$${DIR:?Set DIR to the edition directory}"
 
 authorization: ## DIR=path/to/edition  Print the registration for a reviewed staging package.
 	@$(PYTHON) scripts/issuance.py prepare -- "$${DIR:?Set DIR to the edition directory}"
 
-release-notes: ## DIR=path/to/edition  Print the release body including recorded editorial notices.
+receipt: ## DIR=path/to/edition  Read back the public release and print its verified registration with timestamp.
+	@$(PYTHON) scripts/issuance.py receipt -- "$${DIR:?Set DIR to the edition directory}"
+
+release-notes: ## DIR=path/to/edition  Print the public body with registered identifiers and editorial notices.
 	@$(PYTHON) scripts/editorial_notices.py -- "$${DIR:?Set DIR to the edition directory}"
 
 gateway-plan: ## Preview the asset gateway deployment.
