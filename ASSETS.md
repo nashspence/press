@@ -15,7 +15,8 @@ references are prohibited. Raster files must decode successfully, have at most
 40 million pixels and contain one frame.
 
 Set Cache-Control to **public, max-age=31536000, immutable** on the B2 object
-(X-Bz-Info-b2-cache-control in the Native API). Do not enable image optimization,
+(X-Bz-Info-b2-cache-control in the Native API). Percent-encode B2 custom
+header values when using the Native API directly. Do not enable image optimization,
 transcoding or content rewriting that changes the verified bytes. Never
 overwrite, hide or delete a referenced object. Changed bytes get a new digest.
 
