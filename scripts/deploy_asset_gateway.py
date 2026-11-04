@@ -51,7 +51,7 @@ def deploy(root, *, apply=False):
     parsed = urlsplit(values["B2_PUBLIC_BASE"])
     if (parsed.scheme != "https" or not parsed.hostname or not parsed.hostname.endswith(".backblazeb2.com")
             or parsed.netloc != parsed.hostname or parsed.query or parsed.fragment
-            or not re.fullmatch(r"/file/[A-Za-z0-9-]+", parsed.path)):
+            or not re.fullmatch(r"/file/[A-Za-z0-9][A-Za-z0-9.-]*", parsed.path)):
         raise AssetError("B2_PUBLIC_BASE must be a public B2 HTTPS download origin plus /file/<bucket>")
     if not all(re.fullmatch(r"[a-f0-9]{32}", values[name])
                for name in ["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_ZONE_ID"]):
