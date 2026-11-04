@@ -1,7 +1,7 @@
 # Repository guidance
 
-Give each rule one source of truth. Encode behavior in validators, schemas, or workflows and cover it with executable tests. Link to those definitions when readers need details. Keep prose for editorial decisions, rationale, and steps a person must perform. When authors need an example, test the template they actually copy.
+Make executable rules authoritative in validators, schemas, templates, workflows, and tests. Keep prose only for legal terms, editorial choices, and steps requiring human judgment. Link to executable definitions; never restate their allowed fields, paths, arguments, checks, or generated outputs in a second document. Remove obsolete guides instead of synchronizing copies. Test the examples authors actually copy.
 
-Treat `make help` as the authoritative reference for executable targets and their arguments. Update the help alongside each recipe. Keep target lists and usage examples out of other repository prose.
+`make help` is the sole authority for executable targets and their arguments. Keep its descriptions beside the recipes, cover their completeness with tests, and do not list or demonstrate individual targets in other prose documentation.
 
-Update an unused version in place. Bump it only when an official edition has already used that version and the change requires a successor. Confirm use from the edition’s provenance or the source it identifies.
+Edit an unused version in place. Introduce a successor only if an official edition has already used that version and its recorded bytes need changing; confirm use from release provenance.

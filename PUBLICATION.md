@@ -1,14 +1,7 @@
-# Publishing an edition
+# Publication policy
 
-An edition becomes official when the imprint publishes a full GitHub Release through the protected edition workflow. The attached HTML file named in the release notes is the text to read and cite. Branches, bare tags, draft releases, and prereleases are working material.
+Only an edition issued through the [protected release workflow](.github/workflows/prepare-edition.yml) is official. The canonical HTML attached to its published GitHub Release is the citable text. Commits, bare tags, drafts, and prereleases are not editions. The workflow inputs and [publisher](scripts/publish_edition.py) define publication mechanics.
 
-## Choose the version
+Before approval, review the built text, figures, and rights. Version changes are editorial decisions: normally start at `v1.0.0`; use major for a new edition, minor for substantive revisions, and patch for corrections. Preserve issued tags and artifacts. Describe corrections, supersessions, or withdrawals in the affected [GitHub Release](https://github.com/nashspence/press/releases) and any successor, rather than maintaining a second catalog.
 
-Start a work at `v1.0.0` unless there is an editorial reason to do otherwise. Bump the major version for a substantially new edition, the minor version for a meaningful revision, and the patch version for corrections such as typos or citations.
-
-## Review and publish
-
-1. Review the manuscript on `main`. Run [Prepare verified edition](.github/workflows/prepare-edition.yml) from `main` with the reviewed commit’s full SHA and an edition tag such as `works/example-essay/v1.0.0`. Leave `publish` off to stage a draft.
-2. Open the built HTML from the workflow artifact and review the text, figures, and rights. Approve the `press-release` deployment to stage the draft. Add any editorial notes to the draft below the generated fields. Identify alternate formats and link any edition-specific license terms.
-3. When ready to issue the edition, run the same workflow with the same SHA and tag, select `publish`, and approve the deployment after reviewing the build.
-4. Record any assigned [external identifiers](REGISTRATIONS.md). For a correction or revision, issue a new version and explain its relationship to the earlier edition in the new release notes. Keep issued tags and artifacts intact. Record withdrawals or supersessions in the [catalog](CATALOG.md).
+Verify external identifiers against their issuing registries before recording them, including their exact work, edition, and format. The [registration validator](scripts/identifier_schema.py) defines accepted records; valid identifier syntax alone does not establish ownership.
