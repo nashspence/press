@@ -116,11 +116,12 @@ def verify_bytes(raw: bytes, extension: str, content_type: str) -> str:
             raise AssetError("; ".join(errors))
     else:
         from PIL import Image
+        raster_format = {"png": "PNG", "jpg": "JPEG", "jpeg": "JPEG", "webp": "WEBP"}[extension]
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("error", Image.DecompressionBombWarning)
-                with Image.open(io.BytesIO(raw)) as image:
-                    if image.format != {"png": "PNG", "jpg": "JPEG", "jpeg": "JPEG", "webp": "WEBP"}[extension]:
+                with Image.open(io.BytesIO(raw), formats=[raster_format]) as image:
+                    if image.format != raster_format:
                         raise AssetError("actual image type does not match extension")
                     if image.width * image.height > 40_000_000:
                         raise AssetError("image exceeds 40 million pixel limit")
@@ -128,7 +129,7 @@ def verify_bytes(raw: bytes, extension: str, content_type: str) -> str:
                         raise AssetError("animated images are not supported")
                     image.verify()
                 # verify() alone does not necessarily decompress pixel data.
-                with Image.open(io.BytesIO(raw)) as image:
+                with Image.open(io.BytesIO(raw), formats=[raster_format]) as image:
                     image.load()
         except (OSError, ValueError, SyntaxError, Image.DecompressionBombError,
                 Image.DecompressionBombWarning) as exc:

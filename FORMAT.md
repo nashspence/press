@@ -121,7 +121,7 @@ python3 scripts/validate_sources.py
 python3 scripts/verify_source_assets.py  # networked cryptographic check
 ```
 
-The validator checks source, metadata, Pandoc interpretation, HTML5/MathML, assets and external-identifier **syntax**. It additionally validates any tracked external registry records as specified in [`REGISTRATIONS.md`](REGISTRATIONS.md). CI pins Pandoc 3.12.1, PyYAML 6.0.3 and Pillow 12.0.0. The source
+The validator checks source, metadata, Pandoc interpretation, HTML5/MathML, assets and external-identifier **syntax**. It additionally validates any tracked external registry records as specified in [`REGISTRATIONS.md`](REGISTRATIONS.md). CI pins Pandoc 3.12.1, PyYAML 6.0.3 and Pillow 13.0.0. The source
 validator and its tests stay offline; the separate asset job deliberately depends
 on the approved origin being available.
 
