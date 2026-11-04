@@ -75,6 +75,7 @@ class RecordDeploymentTests(unittest.TestCase):
             bindings = {b['name']: b['text'] for b in upload.call_args.args[-1]}
             self.assertEqual(bindings, {'RECORD_HOST': 'press.publisher.test', 'RECORD_TARGET_BASE': target,
                                         'RECORD_TAG_PATTERN': TAG.pattern})
+            self.assertEqual(request.call_args_list[0].args[1], 'domains?hostname=press.publisher.test')
             domain = json.loads(request.call_args.kwargs['body'])
             self.assertEqual(domain['hostname'], 'press.publisher.test')
             self.assertEqual(domain['service'], 'press-records')

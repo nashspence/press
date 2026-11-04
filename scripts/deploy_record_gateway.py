@@ -46,7 +46,7 @@ def deploy(root, *, apply=False):
         print(f'Plan: deploy records/worker.js as {name}; attach {origin}; redirect editions to {base}')
         return
     account, token = values['CLOUDFLARE_ACCOUNT_ID'], values['CLOUDFLARE_API_TOKEN']
-    domains = cf_request(account, 'domains', token)
+    domains = cf_request(account, 'domains?hostname=' + hostname, token)
     if any(item['hostname'] == hostname and item['service'] != name for item in domains):
         raise AssetError('edition origin is already attached to another Worker')
     settings = cf_request(account, f'scripts/{name}/settings', token, missing_ok=True)
