@@ -19,6 +19,8 @@ The [record gateway](records/worker.js) redirects edition records to GitHub Rele
 
 Keep an independent copy of the three edition files, the receipted registration and the notice history, including after withdrawal. At a recovery host, serve the public record at the same edition path and the unchanged HTML inline at its `/read` path. Keep the permanent reading link, edition identity, original publication timestamp, current identifiers and dated notices visible in the record. Point the gateway at the recovered archive, set the Actions repository variable `RECORD_TARGET` to the same base, then verify both public addresses against the trusted receipt and preserved notices.
 
+Keep workflow files unchanged between staging and publication. GitHub restricts the built-in workflow token from creating or editing a release whose target has different `.github/workflows/` files from current `main`. If those files change after authorization, retire the unissued intent before staging a replacement. Changes after publication can also block automatic notice updates; the issuer must then perform the update with a credential authorized to modify workflows. See [GitHub's release API restrictions](https://docs.github.com/en/rest/releases/releases#update-a-release).
+
 Normally start at `v1.0.0`. Bump major for a substantially new edition, minor for a meaningful revision, and patch for corrections.
 
 ## Publish an editorial notice

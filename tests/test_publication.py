@@ -198,6 +198,17 @@ class PublicationLifecycleTests(unittest.TestCase):
         with self.assertRaisesRegex(AssetError, "remains a draft"):
             self.publish()
 
+    def test_denied_promotion_reports_http_status_without_repeating_the_write(self):
+        self.existing_draft()
+        def denied(*args, **kwargs):
+            if "PATCH" in args:
+                raise AssetError("gh api PATCH failed (HTTP 403)")
+            return self.fake_gh(*args, **kwargs)
+        self.gh.side_effect = denied
+        with self.assertRaisesRegex(AssetError, r"remains a draft.*HTTP 403"):
+            self.publish()
+        self.assertTrue(self.release["draft"])
+
     def test_interrupted_promotion_completes_matching_draft_without_overwriting(self):
         self.existing_draft()
         missing = self.release["assets"].pop()["name"]

@@ -228,7 +228,7 @@ def publish_edition(repo, directory, commit, tag, *, issuer_commit, policy_token
         except (OSError, ValueError, KeyError, TypeError) as exc:
             raise AssetError(f"publication outcome unknown for release {release_id}: {exc}") from request_error
         if state.get("draft") is True:
-            raise AssetError(f"release {release_id} remains a draft after failed promotion") from request_error
+            raise AssetError(f"release {release_id} remains a draft after failed promotion: {request_error}") from request_error
     try:
         verify_remote(repo, release_id, directory, commit, tag, manifest, names, draft=False)
     except (AssetError, OSError, ValueError, KeyError, TypeError) as exc:
