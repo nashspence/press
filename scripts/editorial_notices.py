@@ -16,7 +16,11 @@ EDITION_ID_LABELS = {"version_doi": "Edition DOI", "arxiv_version": "arXiv versi
 
 def markdown_text(value):
     """Display publisher and author strings literally in GitHub Markdown."""
-    return re.sub(r"([\\`*_{}\[\]()<>!|~&#])", r"\\\1", value)
+    escaped = re.sub(r"([\\`*_{}\[\]()<>!|~&#])", r"\\\1", value)
+    # GFM also interprets unescaped list markers at the start of a line. Keep
+    # quoted editorial prose from becoming official notice or identifier items.
+    return re.sub(r"(?m)^( {0,3})([-+]|[0-9]{1,9}\.)(?=\s)",
+                  lambda match: match[1] + match[2][:-1] + "\\" + match[2][-1], escaped)
 
 
 def edition_fields(manifest):

@@ -1,6 +1,7 @@
 """The issuer's edition registration pins the bytes approved after staging."""
 import hashlib
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -12,6 +13,7 @@ from asset_policy import AssetError
 from editorial_notices import edition_notices, release_notes, render_initial_body
 from identifier_schema import validate_registrations
 from issuance import authorization, check_issuance, public_receipt
+from reader_routes import RecordText
 
 
 class IssuanceTests(unittest.TestCase):
@@ -107,6 +109,22 @@ class IssuanceTests(unittest.TestCase):
                     edition_notices(self.root, self.manifest["tag"])
         with self.assertRaises(AssetError):
             render_initial_body(self.manifest, "Edition identifiers\n===\n")
+
+    def test_initial_prose_list_markers_remain_literal_in_the_reader_record(self):
+        for prose in ("- 2026-11-04 Withdrawal: Quoted historical text.\n",
+                      "  + Edition DOI: a quoted example\n", "1. OCLC number: 42\n",
+                      "123456789. An ordered example\n", "1) Another example\n",
+                      "* A literal example\n"):
+            with self.subTest(prose=prose):
+                manifest = {**self.manifest, "initial_release_body": render_initial_body(self.manifest, prose)}
+                notice = "2026-11-05 Correction: The actual editorial notice."
+                rendered = subprocess.check_output(
+                    ["pandoc", "--from=gfm", "--to=html"],
+                    input=release_notes(manifest, ["- " + notice], identifiers={"oclc": "42"}), text=True)
+                parser = RecordText()
+                parser.feed(rendered)
+                self.assertEqual(parser.items, [notice, "OCLC number: 42"])
+                self.assertIn(" ".join(prose.split()), " ".join("".join(parser.text).split()))
 
     def test_record_fields_must_match_package(self):
         original = dict(self.record)
