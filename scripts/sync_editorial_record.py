@@ -79,7 +79,8 @@ def sync(root, repo, tag):
         if delay:
             time.sleep(delay)
         try:
-            verify_reader_routes(manifest, repo, notices=notices)
+            verify_reader_routes(manifest, repo, notices=notices, identifiers=record.get("identifiers"),
+                                 published_at=record["published_at"])
             break
         except (OSError, ValueError):
             if delay == 15:

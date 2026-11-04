@@ -66,6 +66,25 @@ class ReaderRouteTests(unittest.TestCase):
             with self.subTest(hidden=hidden), self.assertRaisesRegex(AssetError, 'committed notice'):
                 self.check()
 
+    def test_identifier_scope_value_and_complete_notice_history_match(self):
+        original = self.page
+        with self.assertRaisesRegex(AssetError, 'registered identifiers'):
+            self.check(identifiers={'oclc': '42'})
+        self.page += '<ul><li>OCLC number: <code>42</code></li></ul>'
+        self.check(identifiers={'oclc': '42'})
+        with self.assertRaisesRegex(AssetError, 'registered identifiers'):
+            self.check()
+        self.page = original.replace('</ul>', '<li>2026-11-05 Correction: Unexpected change.</li></ul>')
+        with self.assertRaisesRegex(AssetError, 'committed notice'):
+            self.check()
+
+    def test_github_abbreviates_visible_source_commit_and_notice(self):
+        sha = self.manifest['source_commit']
+        self.notice += ' ' + sha
+        self.page = self.page.replace('withdrawn.', 'withdrawn. ' + sha)
+        self.page = self.page.replace(sha, f'<a href="/owner/press/commit/{sha}"><code>{sha[:7]}</code></a>')
+        self.check()
+
     def test_wrong_file_and_attachment_download_fail(self):
         self.content = b'<h2>Wrong edition</h2>'
         with self.assertRaisesRegex(AssetError, 'authorized edition bytes'):

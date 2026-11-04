@@ -81,7 +81,8 @@ def public_receipt(root: Path, directory: Path, manifest: dict, repo: str) -> di
     verify_public_release(repo, release, root=root)
     timestamp = release["published_at"]
     record = check_issuance(root, directory, manifest, published_at=timestamp)
-    verify_reader_routes(manifest, repo, notices=edition_notices(root, tag), published_at=timestamp)
+    verify_reader_routes(manifest, repo, notices=edition_notices(root, tag),
+                         identifiers=record.get("identifiers"), published_at=timestamp)
     return {**record, "published_at": timestamp}
 
 

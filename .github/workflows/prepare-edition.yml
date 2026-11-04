@@ -216,6 +216,7 @@ jobs:
       - name: Prepare the verified publication receipt
         env:
           GH_TOKEN: ${{ github.token }}
+          RECORD_TARGET: ${{ vars.RECORD_TARGET }}
         run: |
           mkdir -p dist/receipt
           python scripts/issuance.py receipt dist/edition > dist/receipt/registration.json

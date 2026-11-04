@@ -42,6 +42,15 @@ def verify_public_release(repo, release, *, root=None, require_receipt=False):
     return manifest
 
 
+def verify_registered_routes(root, repo, manifest, published_at, archive_base):
+    tag = manifest['tag']
+    match = TAG.fullmatch(tag)
+    path = Path('registrations/editions') / match[1] / (match[2] + '.json')
+    record = read_registration(root, path)
+    verify_reader_routes(manifest, repo, notices=edition_notices(root, tag), identifiers=record.get('identifiers'),
+                         archive_base=archive_base, published_at=published_at)
+
+
 def audit(root, repo, *, archive_base=None):
     policy = load_policy(root)
     urls = set()
@@ -72,8 +81,7 @@ def audit(root, repo, *, archive_base=None):
             raise AssetError(f"duplicate release for {tag}")
         seen.add(tag)
         manifest = verify_public_release(repo, release, root=root, require_receipt=True)
-        verify_reader_routes(manifest, repo, notices=edition_notices(root, tag), archive_base=archive_base,
-                             published_at=release["published_at"])
+        verify_registered_routes(root, repo, manifest, release["published_at"], archive_base)
         urls.update(record["source_url"] for record in manifest["assets"]
                     if record["source_kind"] == "https")
     for tag in sorted(expected.keys() - seen):
@@ -112,8 +120,10 @@ def main():
             check_authorization(receipt, args.reader, manifest)
             if not valid_utc(receipt.get("published_at")):
                 raise AssetError("--reader requires the trusted receipt's original publication timestamp")
+            if not args.archive_root.is_dir():
+                raise AssetError("--archive-root must be the existing root of the trusted notice history")
             notices = edition_notices(args.archive_root, manifest["tag"])
-            verify_reader_routes(manifest, args.repo, notices=notices, archive_base=args.record_target,
+            verify_reader_routes(manifest, args.repo, notices=notices, identifiers=receipt.get("identifiers"), archive_base=args.record_target,
                                  published_at=receipt["published_at"])
             print("Verified public record and reading copy:", manifest["tag"])
         elif args.release_id is None:
@@ -121,8 +131,7 @@ def main():
         else:
             release = api(args.repo, f"releases/{args.release_id}")
             manifest = verify_public_release(args.repo, release)
-            verify_reader_routes(manifest, args.repo, notices=edition_notices(root, manifest["tag"]),
-                                 archive_base=args.record_target, published_at=release["published_at"])
+            verify_registered_routes(root, args.repo, manifest, release["published_at"], args.record_target)
             print("Verified published edition:", manifest["tag"])
     except (AssetError, OSError, ValueError, KeyError, TypeError) as exc:
         print("ERROR:", exc, file=sys.stderr)

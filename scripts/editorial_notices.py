@@ -9,6 +9,11 @@ from asset_policy import AssetError
 from identifier_schema import EDITION_IDS, TAG, check_identifier_map
 
 
+EDITION_ID_LABELS = {"version_doi": "Edition DOI", "arxiv_version": "arXiv version",
+                     "isbn_epub": "EPUB ISBN", "isbn_pdf": "PDF ISBN", "isbn_print": "Print ISBN",
+                     "oclc": "OCLC number"}
+
+
 def markdown_text(value):
     """Display publisher and author strings literally in GitHub Markdown."""
     return re.sub(r"([\\`*_{}\[\]()<>!|~&#])", r"\\\1", value)
@@ -78,11 +83,8 @@ def release_notes(manifest, notices=(), *, identifiers=None):
         errors = check_identifier_map(identifiers, EDITION_IDS, manifest["tag"])
         if errors:
             raise AssetError("\n".join(errors))
-        labels = {"version_doi": "Edition DOI", "arxiv_version": "arXiv version",
-                  "isbn_epub": "EPUB ISBN", "isbn_pdf": "PDF ISBN", "isbn_print": "Print ISBN",
-                  "oclc": "OCLC number"}
         sections.append("## Edition identifiers\n\n" + "\n".join(
-            f"- {labels[key]}: `{identifiers[key]}`" for key in sorted(identifiers)))
+            f"- {EDITION_ID_LABELS[key]}: `{identifiers[key]}`" for key in sorted(identifiers)))
     return "\n\n".join([*sections, reviewed_initial_body(manifest)])
 
 

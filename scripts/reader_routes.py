@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 
 from asset_policy import AssetError, MAX_HTML_BYTES, public_response, response_chunks
 from deploy_record_gateway import target_base
+from editorial_notices import EDITION_ID_LABELS
 from identifier_schema import valid_record_url
 
 # A record is a text page, separate from the potentially image-heavy edition.
@@ -27,6 +28,8 @@ class RecordText(HTMLParser):
         self.links = set()
         self.times = set()
         self.commit_text = None
+        self.item_start = None
+        self.items = []
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
@@ -38,6 +41,8 @@ class RecordText(HTMLParser):
             return
         if tag in self.blocks:
             self.text.append(' ')
+        if tag == 'li':
+            self.item_start = len(self.text)
         if tag == 'time':
             self.times.add(attrs.get('datetime'))
         if tag == 'a':
@@ -59,6 +64,9 @@ class RecordText(HTMLParser):
                 self.text[start:] = [sha]
             self.commit_text = None
         elif not self.hidden and tag in self.blocks:
+            if tag == 'li' and self.item_start is not None:
+                self.items.append(' '.join(''.join(self.text[self.item_start:]).split()))
+                self.item_start = None
             self.text.append(' ')
 
     def handle_data(self, data):
@@ -79,7 +87,7 @@ def require_html(response, url):
         raise AssetError(f'{url}: expected publicly readable inline HTML (HTTP {response.status})')
 
 
-def verify_reader_routes(manifest, repo, *, notices=(), archive_base=None, published_at=None):
+def verify_reader_routes(manifest, repo, *, notices=(), identifiers=None, archive_base=None, published_at=None):
     tag = manifest['tag']
     url = manifest['record_url']
     if not valid_record_url(url, tag):
@@ -97,9 +105,16 @@ def verify_reader_routes(manifest, repo, *, notices=(), archive_base=None, publi
     source = manifest['source_commit']
     if source not in text:
         raise AssetError(f'{url}: public record omits the source commit')
-    for value in [manifest['canonical_artifact'], *(n[2:] for n in notices)]:
-        if ' '.join(value.split()) not in text:
-            raise AssetError(f'{url}: public record omits edition identity or a committed notice')
+    if manifest['canonical_artifact'] not in text:
+        raise AssetError(f'{url}: public record omits the canonical filename')
+    visible_notices = [item for item in parser.items if re.match(r'\d{4}-\d{2}-\d{2} (Correction|Withdrawal|Supersession): ', item)]
+    if visible_notices != [' '.join(n[2:].split()) for n in notices]:
+        raise AssetError(f'{url}: public record differs from the committed notice history')
+    labels = tuple(name + ': ' for name in EDITION_ID_LABELS.values())
+    visible_ids = [item for item in parser.items if item.startswith(labels)]
+    expected_ids = [EDITION_ID_LABELS[key] + ': ' + value for key, value in (identifiers or {}).items()]
+    if sorted(visible_ids) != sorted(expected_ids):
+        raise AssetError(f'{url}: public record differs from the registered identifiers')
     read_url = url + '/read'
     if read_url not in parser.links:
         raise AssetError(f'{url}: public record omits its reading link')

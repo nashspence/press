@@ -7,6 +7,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import yaml
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from asset_policy import AssetError
 from sync_editorial_record import affected_tags, sync
@@ -59,6 +61,15 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(affected_tags(paths), [self.tag, "works/other/v2.0.0"])
         with self.assertRaises(AssetError):
             affected_tags(b"notices/essay/not-a-version/0001.md\0")
+
+    def test_workflow_scopes_writes_to_main_and_serializes_each_edition(self):
+        path = Path(__file__).resolve().parents[1] / ".github/workflows/sync-editorial-record.yml"
+        workflow = yaml.safe_load(path.read_text())
+        jobs = workflow["jobs"]
+        self.assertEqual(jobs["select"]["if"], "github.ref == 'refs/heads/main'")
+        self.assertEqual(workflow["permissions"], {"contents": "read"})
+        self.assertEqual(jobs["synchronize"]["needs"], "select")
+        self.assertIn("matrix.tag", jobs["synchronize"]["concurrency"]["group"])
 
     def test_merged_withdrawal_syncs_once_and_is_checked_on_retry(self):
         notice = self.root / "notices/essay/v1.0.0/0001.md"
