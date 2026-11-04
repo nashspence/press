@@ -77,7 +77,7 @@ class RecordText(HTMLParser):
 def require_redirect(url, expected):
     with public_response(url, 'text/html') as response:
         if response.status not in {302, 307} or response.getheader('Location') != expected:
-            raise AssetError(f'{url}: expected a temporary redirect to {expected}')
+            raise AssetError(f'{url}: expected a temporary redirect to {expected} (HTTP {response.status})')
 
 
 def require_html(response, url):

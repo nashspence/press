@@ -1,5 +1,5 @@
 // Keep the cited addresses stable when the publisher changes archive providers.
-const headers = {'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
+const headers = {'Cache-Control': 'no-store, no-transform', 'X-Content-Type-Options': 'nosniff',
                  'Referrer-Policy': 'no-referrer'};
 const error = status => new Response(null, {status, headers});
 const redirect = target => new Response(null, {status: 302, headers: {...headers, Location: target}});

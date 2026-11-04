@@ -17,7 +17,7 @@ test('edition addresses redirect without fetching and can move to a recovered ar
       const response = await worker.fetch(new Request(address, {method}), env);
       assert.equal(response.status, 302);
       assert.equal(response.headers.get('Location'), env.RECORD_TARGET_BASE + '/works/sample-work/v1.0.0');
-      assert.equal(response.headers.get('Cache-Control'), 'no-store');
+      assert.equal(response.headers.get('Cache-Control'), 'no-store, no-transform');
       assert.equal(await response.text(), '');
     }
     const recovered = await worker.fetch(new Request(address), {...env, RECORD_TARGET_BASE: 'https://recovered.publisher.test'});
@@ -82,6 +82,7 @@ test('section citations serve only the registered immutable HTML inline, streami
     const response = await read(method);
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('Content-Disposition'), 'inline');
+    assert.match(response.headers.get('Cache-Control'), /(?:^|, )no-transform(?:,|$)/);
     assert.match(response.headers.get('Content-Type'), /^text\/html/);
     assert.match(response.headers.get('Content-Security-Policy'), /default-src 'none'/);
     assert.equal(response.headers.get('Set-Cookie'), null);
