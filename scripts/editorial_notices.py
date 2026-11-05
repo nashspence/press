@@ -6,7 +6,7 @@ import re
 import sys
 
 from asset_policy import AssetError
-from identifier_schema import EDITION_IDS, TAG, VERSION, check_identifier_map
+from identifier_schema import EDITION_IDS, TAG, VERSION, check_identifier_map, version_key
 
 
 EDITION_ID_LABELS = {"version_doi": "Edition DOI", "arxiv_version": "arXiv version",
@@ -111,7 +111,7 @@ def edition_status(notices, version, receipts):
             replacement = suffix[1]
             if replacement == version or replacement not in receipts or receipts[replacement]["published_at"][:10] > day:
                 raise AssetError(f"{version}: replacement must be another edition of this work published by {day}")
-            if kind == "Supersession:" and tuple(map(int, replacement[1:].split("."))) < tuple(map(int, version[1:].split("."))):
+            if kind == "Supersession:" and version_key(replacement) < version_key(version):
                 raise AssetError(f"{version}: a supersession replacement must be a higher edition")
         if kind == "Withdrawal:":
             status, successor = "Withdrawn", replacement

@@ -10,7 +10,7 @@ from urllib.parse import quote
 from asset_policy import AssetError
 from build_edition import git
 from editorial_notices import EDITION_ID_LABELS, edition_fields, edition_notices, edition_status
-from identifier_schema import TAG, concept_doi_history, edition_origin, valid_record_url, valid_utc
+from identifier_schema import TAG, concept_doi_history, edition_origin, valid_record_url, valid_utc, version_key
 from issuance import check_authorization, read_registration
 from verify_edition import verify_edition
 
@@ -122,11 +122,11 @@ def claimed_registrations(root, paths):
         tag = f"works/{path.parent.name}/{path.stem}"
         if len(path.parts) != 4 or path.suffix != ".json" or not TAG.fullmatch(tag):
             raise AssetError(f"{path}: invalid edition registration path")
-        receipt = read_registration(root, path)
-        if "published_at" in receipt and (receipt.get("issuing") is not True or not valid_utc(receipt["published_at"])):
+        record = read_registration(root, path)
+        if "published_at" in record and (record.get("issuing") is not True or not valid_utc(record["published_at"])):
             raise AssetError(f"{tag}: publication receipt requires an issuing claim and valid timestamp")
-        if receipt.get("issuing") is True:
-            yield path.parent.name, path.stem, receipt
+        if record.get("issuing") is True:
+            yield path.parent.name, path.stem, record
 
 
 def work_projection(root, slug, receipts, *, write=False):
@@ -175,7 +175,7 @@ def work_projection(root, slug, receipts, *, write=False):
             page.append(f'<li>{escape(change["date"])} · {escape(decision)}</li>')
         page.append("</ul>")
     page.append("<ol>")
-    for version in sorted(receipts, key=lambda v: tuple(map(int, v[1:].split("."))), reverse=True):
+    for version in sorted(receipts, key=version_key, reverse=True):
         receipt = receipts[version]
         if receipt["record_url"] != f"{work_url}/{version}":
             raise AssetError(f"{slug}/{version}: receipt uses a different permanent work address")

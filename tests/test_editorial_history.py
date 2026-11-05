@@ -97,6 +97,8 @@ class EditorialHistoryTests(unittest.TestCase):
         history.append({'date': '2026-11-07', 'from': new, 'to': None})
         write()
         self.check(corrected)
+        with self.assertRaisesRegex(AssetError, 'record one dated'):
+            self.check(base)
         retired = self.baseline()
         path.unlink()
         with self.assertRaisesRegex(AssetError, 'append-only'):

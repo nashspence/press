@@ -1,4 +1,4 @@
-"""Check that issued and candidate editions agree with the checkout's profile files."""
+"""Check that claimed and candidate editions agree with the checkout's profile files."""
 import argparse
 import json
 import sys

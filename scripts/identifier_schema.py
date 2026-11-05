@@ -36,6 +36,10 @@ ARXIV_NEW = re.compile(r"[0-9]{2}(?:0[1-9]|1[0-2])\.[0-9]{4,5}\Z")
 ARXIV_OLD = re.compile(r"[a-z][a-z0-9.-]*/[0-9]{7}\Z")
 
 
+def version_key(version: str) -> tuple[int, ...]:
+    return tuple(map(int, version[1:].split(".")))
+
+
 def valid_origin(value: str) -> bool:
     return value.startswith("https://") and bool(HOST.fullmatch(value[8:]))
 
