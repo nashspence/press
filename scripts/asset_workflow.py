@@ -59,7 +59,7 @@ def retire(root, repo, branch, expected, token):
         raise AssetError("retirement requires a full reviewed branch tip SHA")
     if not token:
         raise AssetError("branch retirement requires its separate repository-scoped App token")
-    metadata = api(repo, "")
+    metadata = json.loads(gh("api", "repos/" + repo))
     if branch == metadata["default_branch"]:
         raise AssetError("the default branch cannot be retired")
     for pr in pages(repo, "pulls?state=open&per_page=100"):

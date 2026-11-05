@@ -353,7 +353,7 @@ class GitRetentionTests(unittest.TestCase):
             if args[:2] == ["gh", "api"]:
                 return subprocess.CompletedProcess(args, 0, json.dumps({"ref": "refs/heads/retire-me", "object": {"sha": first}}), "")
             return original_run(args, **kwargs)
-        with patch("asset_workflow.api", return_value={"default_branch": "main"}), \
+        with patch("asset_workflow.gh", return_value=json.dumps({"default_branch": "main"})), \
              patch("asset_workflow.pages", return_value=[]), patch("asset_workflow.git", side_effect=push), \
              patch("asset_workflow.subprocess.run", side_effect=read_ref), self.assertRaises(AssetError):
             asset_workflow.retire(self.root, "publisher/press", "retire-me", first, "fixture-token")
@@ -374,7 +374,7 @@ class GitRetentionTests(unittest.TestCase):
             observed.append((args, kwargs["env"]["GH_TOKEN"]))
             args = tuple(str(self.origin) if arg == "https://github.com/publisher/press.git" else arg for arg in args)
             return git(root, *args, **kwargs)
-        with patch("asset_workflow.api", return_value={"default_branch": "main"}), \
+        with patch("asset_workflow.gh", return_value=json.dumps({"default_branch": "main"})), \
              patch("asset_workflow.pages", return_value=[]), patch("asset_workflow.git", side_effect=push), \
              patch("asset_workflow.subprocess.run", side_effect=read_ref), contextlib.redirect_stdout(io.StringIO()):
             asset_workflow.retire(self.root, "publisher/press", "retire-me", head, "fixture-app-token")
@@ -402,7 +402,7 @@ class WorkflowTests(unittest.TestCase):
         with self.assertRaises(AssetError):
             asset_workflow.retire(Path("."), "publisher/press", "main", "a" * 40, "fixture")
         pr = {"head": {"repo": {"full_name": "publisher/press"}, "ref": "active"}, "base": {"ref": "main"}}
-        with patch("asset_workflow.api", return_value={"default_branch": "main"}), \
+        with patch("asset_workflow.gh", return_value=json.dumps({"default_branch": "main"})), \
              patch("asset_workflow.pages", return_value=[pr]), self.assertRaises(AssetError):
             asset_workflow.retire(Path("."), "publisher/press", "active", "a" * 40, "fixture")
 
