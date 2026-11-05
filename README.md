@@ -21,7 +21,7 @@ The issuer is responsible for keeping the independent editorial backup current. 
 
 At a recovery host, serve the generated page at the exact edition path without a trailing slash, the unchanged HTML inline at its `/read` path, and the three named attachments directly beneath the edition path. Check the backup directly against the independently retained checkpoint before switching the gateway. After cutover set the Actions variable `RECORD_TARGET` to the same base and verify the permanent URLs. Republish the generated record to the recovery host after each editorial update. The GitHub archive audit continues to report loss of the primary release independently.
 
-Keep workflow files compatible between staging and publication. A change after reservation can still require retiring an unissued intent. After issuance an older release target can prevent the built-in token from updating its release notes. The current publisher record is served from the merged page even if the GitHub mirror requires an operator update. [GitHub release API restrictions](https://docs.github.com/en/rest/releases/releases#update-a-release)
+Keep workflow files compatible between staging and publication. A change after reservation can still require retiring an unissued intent. After issuance, GitHub mirror writes can still fail because of permissions or service availability. The current publisher record is served from the merged page even if the GitHub mirror requires an operator update. [GitHub release API restrictions](https://docs.github.com/en/rest/releases/releases#update-a-release)
 
 Normally start at `v1.0.0`. Bump major for a substantially new edition, minor for a meaningful revision, and patch for corrections.
 
