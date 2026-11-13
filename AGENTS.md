@@ -1,16 +1,12 @@
-# Working on Press
+# Publishing with Press
 
-The [tests](tests/) are authoritative for enforceable behavior. Change tests and implementation together; test the starter authors actually copy.
+Press holds works, editions and publisher configuration. Reusable software and its contracts live in [GuavaJam core](https://github.com/nashspence/guavajam/tree/main/projects/core).
 
-- Developers: [required CI](.github/workflows/validate-source.yml) and [tests](tests/).
-- Capture developers: load [the extension](tools/chatgpt-capture/) unpacked in Chrome; [browser qualification](tests/test_chatgpt_capture_browser.mjs) exercises its real permissions and downloads.
-- Submitters: [manuscript starter](templates/work/manuscript.md), [supporting GFM starter](templates/work/supporting/note.md), [manuscript contract](tests/test_validate_sources.py), and [evidence contract](tests/test_gfm_source_contract.py), and [metadata contract](tests/test_supporting_metadata.py).
-- Indexers: [discovery contract](tests/test_discovery.py), [export tests](tests/test_site_export.py), and [site settings schema](schemas/press-site-v1.schema.json).
-- Publishers: [signed publication contract](tests/test_signed_commit_publication.py) and [publication checker](scripts/publication_commit.py). Supply signer trust independently of the source repository.
-- Asset operators: [credential template](storage/credentials.env.example), [storage contract](tests/test_asset_storage.py), and [maintenance workflow](.github/workflows/maintain-assets.yml).
+- Start with `make setup`, `make help` and `make work`. Review generated material before committing.
+- [Consumer tests](tests/test_press.py) cover this repository's dependency and commands; [CI](.github/workflows/validate-source.yml) validates source and assets.
+- `make capture` exports the installed capture extension. Native conversations and private review output stay outside tracked publication sources.
+- [Asset maintenance](.github/workflows/maintain-assets.yml) owns this publisher's operational gates. `make asset-credentials` creates its local credential template.
+- `make site-template` drafts publisher-owned settings; review, commit and sign the checkpoint separately.
+- Supply signer trust independently of the source repository. Publication requires the owner's deliberate signature; software installation never issues an edition.
 
-Use `make help` for commands and arguments; maintain that help with its [recipes](Makefile).
-
-Keep README.md absolutely minimal and this file a short onboarding map. Link to tested contracts instead of restating them. Keep rationale and verification history in issues/PRs.
-
-After recording rehearsal results in the owning issue/PR, delete disposable repositories and task-created hosting resources. The owner has authorized this cleanup without further confirmation.
+Keep README minimal and this onboarding short. Tests define enforceable behavior. Put rationale and verification history in issues/PRs. Delete task-created disposable repositories and hosting resources after recording qualification results.

@@ -20,6 +20,16 @@ wheels = [
 ]
 
 [[package]]
+name = "guavajam-core"
+version = "0.1.0"
+source = { git = "https://github.com/nashspence/guavajam?subdirectory=projects%2Fcore&rev=97c30073905eb115798e952d6c7620d53799b5aa#97c30073905eb115798e952d6c7620d53799b5aa" }
+dependencies = [
+    { name = "av" },
+    { name = "pillow" },
+    { name = "pyyaml" },
+]
+
+[[package]]
 name = "pillow"
 version = "13.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -42,21 +52,15 @@ wheels = [
 ]
 
 [[package]]
-name = "press-build"
+name = "press"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "av" },
-    { name = "pillow" },
-    { name = "pyyaml" },
+    { name = "guavajam-core" },
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "av", specifier = "==19.0.2" },
-    { name = "pillow", specifier = "==13.0.0" },
-    { name = "pyyaml", specifier = "==6.0.3" },
-]
+requires-dist = [{ name = "guavajam-core", git = "https://github.com/nashspence/guavajam?subdirectory=projects%2Fcore&rev=97c30073905eb115798e952d6c7620d53799b5aa" }]
 
 [[package]]
 name = "pyyaml"
