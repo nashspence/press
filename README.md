@@ -1,7 +1,5 @@
 # Press
 
-An independent publishing imprint under the authority of Nash Spence.
+Source works and signed editions by Nash Spence.
 
-[Canonical signed-commit publications](scripts/publication_commit.py) · [Copyright and permissions](COPYRIGHT.md)
-
-[Contributing and publishing](AGENTS.md). Run `make help` for commands.
+[Publishing workflow](AGENTS.md). Run `make help` for commands. Tooling comes from [GuavaJam core](https://github.com/nashspence/guavajam/tree/main/projects/core).
