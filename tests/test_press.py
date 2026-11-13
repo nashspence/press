@@ -59,11 +59,18 @@ class PublisherTests(unittest.TestCase):
             self.make(repo, 'check-source')
             self.make(repo, 'check-assets')
             self.command(repo, 'git', 'commit', '-qm', 'Reviewed draft')
+            draft = self.command(repo, 'git', 'rev-parse', 'HEAD').stdout.strip()
+            self.make(repo, 'publication-prepare', 'REV=' + draft, 'WORK=field-notes', 'PUBLISHED=', ok=False)
+            prepared = self.make(repo, 'publication-prepare', 'REV=' + draft, 'WORK=field-notes',
+                                 'PUBLISHED=2026-11-13', 'LABEL=Initial edition')
+            trailers = json.loads(prepared.stdout)['publication_trailers']
+            self.assertEqual(['Press-Publication: 1', 'Press-Work: works/field-notes/manuscript.md',
+                              'Press-Published: 2026-11-13', 'Press-Label: Initial edition'], trailers)
             key = parent / 'key'
             self.command(repo, 'ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(key))
             self.command(repo, 'git', 'config', 'gpg.format', 'ssh')
             self.command(repo, 'git', 'config', 'user.signingkey', str(key))
-            message = 'Press-Publication: 2\nPress-Work: works/field-notes/manuscript.md\nPress-Published: 2026-11-13'
+            message = '\n'.join(trailers)
             self.command(repo, 'git', 'commit', '--allow-empty', '-S', '-m', 'Publish', '-m', message)
             revision = self.command(repo, 'git', 'rev-parse', 'HEAD').stdout.strip()
             signers = parent / 'allowed-signers'
