@@ -1,0 +1,11 @@
+[project]
+name = "press"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = ["guavajam-core==0.1.0"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+guavajam-core = { git = "https://github.com/nashspence/guavajam", rev = "767ac23d652e4c712fb2831626aae6cb9c5d3a19", subdirectory = "projects/core" }
