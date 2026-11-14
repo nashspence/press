@@ -66,7 +66,7 @@ class PublisherTests(unittest.TestCase):
             prepared = self.make(repo, 'image', 'FILE=' + str(asset))
             self.assertIn('Object: ' + key, prepared.stdout)
             self.assertIn('URL: https://assets.example.org/' + key, prepared.stdout)
-            plan = self.make(repo, 'gateway-plan', 'B2_ENV=' + str(repo / 'absent-credentials'))
+            plan = self.make(repo, 'gateway-plan', 'S3_ENV=' + str(repo / 'absent-credentials'))
             self.assertIn('https://assets.example.org', plan.stdout)
             self.assertIn('no API writes or credential reads', plan.stdout)
 
@@ -92,7 +92,10 @@ class PublisherTests(unittest.TestCase):
             self.make(repo, 'publication-prepare', 'REV=' + draft, 'WORK=field-notes', 'PUBLISHED=', ok=False)
             prepared = self.make(repo, 'publication-prepare', 'REV=' + draft, 'WORK=field-notes',
                                  'PUBLISHED=2026-11-13', 'LABEL=Initial edition')
-            trailers = json.loads(prepared.stdout)['publication_trailers']
+            receipt = json.loads(prepared.stdout)
+            self.assertTrue(receipt['assets_verified'])
+            self.assertFalse(receipt['retention_verified'])  # This edition has no asset dependencies.
+            trailers = receipt['publication_trailers']
             self.assertEqual(['Press-Publication: 1', 'Press-Work: works/field-notes/manuscript.md',
                               'Press-Published: 2026-11-13', 'Press-Label: Initial edition'], trailers)
             key = parent / 'key'
@@ -118,6 +121,10 @@ class PublisherTests(unittest.TestCase):
             credentials = root / 'credentials.example'
             self.make(ROOT, 'asset-credentials', 'OUTPUT=' + str(credentials))
             self.assertEqual(0o600, credentials.stat().st_mode & 0o777)
+            from guavajam_core.asset_storage import VARIABLES
+            fields = {line.partition('=')[0] for line in credentials.read_text().splitlines()
+                      if line and not line.startswith('#')}
+            self.assertEqual(VARIABLES, fields)
             self.make(ROOT, 'asset-credentials', 'OUTPUT=' + str(credentials), ok=False)
             capture = root / 'capture'
             self.make(ROOT, 'capture', 'OUTPUT=' + str(capture))
@@ -133,6 +140,8 @@ class PublisherTests(unittest.TestCase):
             for job in workflow['jobs'].values():
                 self.assertTrue(any(step.get('run') == 'make setup' for step in job['steps']))
                 check = next(step for step in job['steps'] if 'guavajam_core.check_publications' in step.get('run', ''))
+                if '--offline' not in check['run']:
+                    self.assertIn('--require-retention', check['run'])
                 for key in ['PRESS_PUBLISHER_GPG_FINGERPRINTS', 'PRESS_PUBLISHER_GPG_PUBLIC_KEYS', 'PRESS_PUBLISHER_SSH_SIGNERS']:
                     self.assertEqual('${{ vars.' + key + ' }}', check['env'][key])
 
@@ -152,8 +161,11 @@ class PublisherTests(unittest.TestCase):
         self.assertNotIn('PRESS_ASSET_RETIRE_TOKEN', operation['env'])
         from guavajam_core.asset_storage import VARIABLES
         self.assertTrue(VARIABLES.isdisjoint(retirement['env']))
+        credentials = {'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY', 'S3_SESSION_TOKEN'}
         for name in VARIABLES:
-            self.assertEqual('${{ secrets.' + name + ' }}', operation['env'][name])
+            source = 'secrets' if name in credentials else 'vars'
+            self.assertEqual('${{ ' + source + '.' + name + ' }}', operation['env'][name])
+        self.assertRegex((ROOT / 'Makefile').read_text(), r'(?m)^REQUIRE_RETENTION \?= 1$')
 
 
 if __name__ == '__main__':
