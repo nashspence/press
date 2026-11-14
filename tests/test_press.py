@@ -1,5 +1,6 @@
 """Publisher consumer contracts against the installed, immutable GuavaJam core."""
 from pathlib import Path
+import hashlib
 import importlib.metadata
 import importlib.util
 import json
@@ -40,6 +41,34 @@ class PublisherTests(unittest.TestCase):
         self.assertEqual(source['rev'], direct['vcs_info']['commit_id'])
         self.assertEqual('projects/core', direct['subdirectory'])
         self.assertIsNone(importlib.util.find_spec('guavajam'))
+
+    def test_setup_then_help_and_asset_commands_work_in_one_parallel_invocation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            credentials = Path(directory) / 'credentials.example'
+            result = self.command(
+                ROOT, 'env', 'MISE_LOCKFILE=false', 'make', '--no-print-directory',
+                '--file', str(ROOT / 'Makefile'), '--jobs=2', 'setup', 'help',
+                'asset-credentials', 'PYTHON=' + sys.executable, 'OUTPUT=' + str(credentials))
+            targets = {line.split()[0] for line in result.stdout.splitlines() if line.startswith('  ')}
+            self.assertTrue({'asset-credentials', 'image', 'asset-upload', 'asset-pin',
+                             'assets-gc', 'asset-retire', 'assets-policy-plan',
+                             'assets-policy-apply', 'gateway-plan', 'gateway-deploy'} <= targets)
+            self.assertEqual(0o600, credentials.stat().st_mode & 0o777)
+
+    def test_offline_asset_commands_use_the_callers_repository(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.command(repo, 'git', 'init', '-q', '-b', 'main')
+            (repo / 'asset-policy.json').write_text(json.dumps({'origin': 'https://assets.example.org'}))
+            asset = repo / 'attachment.txt'
+            asset.write_bytes(b'Original attachment bytes.\n')
+            key = 'sha256/' + hashlib.sha256(asset.read_bytes()).hexdigest() + '.bin'
+            prepared = self.make(repo, 'image', 'FILE=' + str(asset))
+            self.assertIn('Object: ' + key, prepared.stdout)
+            self.assertIn('URL: https://assets.example.org/' + key, prepared.stdout)
+            plan = self.make(repo, 'gateway-plan', 'B2_ENV=' + str(repo / 'absent-credentials'))
+            self.assertIn('https://assets.example.org', plan.stdout)
+            self.assertIn('no API writes or credential reads', plan.stdout)
 
     def test_real_authoring_signing_and_publication_check_use_installed_core(self):
         with tempfile.TemporaryDirectory() as directory:

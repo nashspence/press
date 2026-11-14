@@ -2,4 +2,4 @@
 
 Source works and signed editions by Nash Spence.
 
-[Publishing workflow](AGENTS.md). Run `make help` for commands. Tooling comes from [GuavaJam core](https://github.com/nashspence/guavajam/tree/main/projects/core).
+Run `make setup help` for publishing and asset commands. Press loads their recipes from the pinned [GuavaJam core](https://github.com/nashspence/guavajam/tree/main/projects/core) dependency. [Publishing workflow](AGENTS.md).
