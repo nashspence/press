@@ -2,6 +2,7 @@
 .PHONY: help setup test
 PYTHON := mise exec -- uv run --locked python
 ASSET_WORKER ?= press-assets
+REQUIRE_RETENTION ?= 1
 
 # Load publisher recipes only after setup has installed the locked dependency.
 ifneq ($(filter setup,$(MAKECMDGOALS)),)

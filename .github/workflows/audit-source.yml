@@ -30,4 +30,4 @@ jobs:
           PRESS_PUBLISHER_SSH_SIGNERS: ${{ vars.PRESS_PUBLISHER_SSH_SIGNERS }}
         run: |
           make check-assets
-          mise exec -- .venv/bin/python -m guavajam_core.check_publications --all
+          mise exec -- .venv/bin/python -m guavajam_core.check_publications --all --require-retention
