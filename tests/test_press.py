@@ -142,6 +142,12 @@ class PublisherTests(unittest.TestCase):
             self.assertFalse(result['public_release'])
             self.command(repo, sys.executable, '-I', str(ROOT / 'tools/qualify_candidate.py'),
                          '--repo', str(repo), '--revision', '0' * 40, ok=False)
+            (repo / 'works/field-notes').rename(repo / 'works/INVALID')
+            self.command(repo, 'git', 'add', '-A')
+            self.command(repo, 'git', 'commit', '-qm', 'Malformed candidate work')
+            bad = self.command(repo, 'git', 'rev-parse', 'HEAD').stdout.strip()
+            self.command(repo, sys.executable, '-I', str(ROOT / 'tools/qualify_candidate.py'),
+                         '--repo', str(repo), '--revision', bad, ok=False)
 
     def test_exported_resources_are_from_the_installed_distribution_and_do_not_overwrite(self):
         with tempfile.TemporaryDirectory() as directory:

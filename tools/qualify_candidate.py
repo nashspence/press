@@ -9,6 +9,8 @@ import sys
 from guavajam_core.publication_protocol import oid, run
 from guavajam_core.qualify_assets import qualify
 from guavajam_core.check_publications import check
+from guavajam_core.source_snapshot import snapshot
+from guavajam_core.validate_sources import validate_repository
 
 
 def qualify_candidate(repo, revision):
@@ -16,6 +18,9 @@ def qualify_candidate(repo, revision):
     if run(repo,'rev-parse','HEAD').decode().strip()!=revision:
         raise ValueError('Candidate HEAD differs')
     check(repo,'',online=False,all_history=True)
+    with snapshot(repo,revision) as (root,files):
+        if validate_repository(root,files,enforce_version=True):
+            raise ValueError('Candidate source validation failed')
     paths=run(repo,'ls-tree','-r','--name-only','-z',revision).decode('utf-8').split('\0')
     works=sorted({match[1] for path in paths if (match:=re.fullmatch(r'works/([a-z0-9]+(?:-[a-z0-9]+)*)/manuscript\.md',path))})
     for work in works:
