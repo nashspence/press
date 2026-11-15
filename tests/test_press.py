@@ -71,6 +71,15 @@ class PublisherTests(unittest.TestCase):
             self.assertIn('https://assets.example.org', plan.stdout)
             self.assertIn('no API writes or credential reads', plan.stdout)
 
+    def test_release_requires_explicit_separate_authority_before_reading_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.command(repo, 'git', 'init', '-q', '-b', 'main')
+            result = self.make(repo, 'assets-release', 'REV='+'a'*40, 'MAIN_SHA='+'b'*40,
+                               'TRUSTED_GPG_FINGERPRINT='+'c'*40, 'S3_RELEASE_ENV=',
+                               'S3_ENV='+str(repo/'absent-read-credentials'), ok=False)
+            self.assertIn('Set separate release-prefix credential file', result.stderr)
+
     def test_real_authoring_signing_and_publication_check_use_installed_core(self):
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory)
