@@ -3,10 +3,9 @@
 Press holds works, editions and publisher configuration. Reusable software and its contracts live in [GuavaJam core](https://github.com/nashspence/guavajam/tree/main/projects/core).
 
 - Start with `make setup`, `make help` and `make work`. Review generated material before committing.
-- [Consumer tests](tests/test_press.py) cover this repository's dependency and commands; [CI](.github/workflows/validate-source.yml) validates source and assets.
-- `make capture` exports the installed capture extension. Native conversations and private review output stay outside tracked publication sources.
-- [Asset maintenance](.github/workflows/maintain-assets.yml) uses environment `press-assets`; `make asset-credentials` exports current [S3 configuration](https://github.com/nashspence/guavajam/blob/main/docs/storage.md). Preparation and online CI checks require retention.
-- `make site-template` drafts publisher-owned settings; review, commit and sign the checkpoint separately.
-- Supply signer trust independently of the source repository. Publication requires the owner's deliberate signature; software installation never issues an edition.
+- [Consumer contracts](tests/test_press.py) cover installed commands and workflow authority; [source CI](.github/workflows/validate-source.yml), [private qualification](.github/workflows/qualify-assets.yml), [maintenance](.github/workflows/maintain-assets.yml) and [public audits](.github/workflows/audit-source.yml) encode verification.
+- `make capture` exports the installed extension. Native conversations and private review output stay outside tracked sources.
+- [Core release contracts](https://github.com/nashspence/guavajam/blob/main/projects/core/tests/test_asset_release.py) define private staging and signed-main release. Complete the [operator cutover](https://github.com/nashspence/press/issues/100) before staging private material.
+- Supply signer trust independently. Publication requires the owner's deliberate signature; software installation never issues an edition.
 
-Keep README minimal and this onboarding short. Tests define enforceable behavior. Put rationale and verification history in issues/PRs. Delete task-created disposable repositories and hosting resources after recording qualification results.
+Keep README and onboarding minimal. Tests define enforceable behavior; put rationale and verification history in issues/PRs. Delete task-created disposable resources after qualification.

@@ -1,0 +1,96 @@
+name: Qualify private manuscript assets
+
+on:
+  workflow_run:
+    workflows: [Validate sources]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Exact reviewed candidate commit SHA; every committed work is qualified privately
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  statuses: write
+
+# Coordinate with collection. Qualification itself has no write/delete authority.
+concurrency:
+  group: press-asset-maintenance
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == github.repository))
+    environment: press-assets-readonly
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      CANDIDATE_SHA: ${{ inputs.revision || github.event.workflow_run.head_sha }}
+    steps:
+      - name: Select one immutable candidate
+        run: |
+          python3 - <<'PY'
+          import os,re
+          if not re.fullmatch(r'[0-9a-f]{40}',os.environ['CANDIDATE_SHA']):
+              raise SystemExit('Select an exact lowercase SHA-1 commit')
+          PY
+      - name: Install tooling only from trusted main
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: refs/heads/main
+          path: tooling
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c
+        with:
+          version: 2026.11.0
+          install: false
+          working_directory: tooling
+      - run: make setup
+        working-directory: tooling
+      - name: Fetch candidate objects without a checkout
+        env:
+          REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}.git
+        run: |
+          git init --bare --initial-branch=main "$RUNNER_TEMP/candidate.git"
+          git -C "$RUNNER_TEMP/candidate.git" -c core.hooksPath=/dev/null -c protocol.ext.allow=never -c fetch.fsckObjects=true fetch --no-tags --no-recurse-submodules "$REPOSITORY_URL" "$CANDIDATE_SHA"
+          test "$(git -C "$RUNNER_TEMP/candidate.git" rev-parse FETCH_HEAD)" = "$CANDIDATE_SHA"
+          git -C "$RUNNER_TEMP/candidate.git" update-ref refs/heads/main "$CANDIDATE_SHA"
+      - name: Qualify every committed work with read-only credentials
+        id: qualify
+        working-directory: tooling
+        env:
+          PRESS_PUBLISHER_GPG_FINGERPRINTS: ${{ vars.PRESS_PUBLISHER_GPG_FINGERPRINTS }}
+          PRESS_PUBLISHER_GPG_PUBLIC_KEYS: ${{ vars.PRESS_PUBLISHER_GPG_PUBLIC_KEYS }}
+          PRESS_PUBLISHER_SSH_SIGNERS: ${{ vars.PRESS_PUBLISHER_SSH_SIGNERS }}
+          S3_ENDPOINT: ${{ vars.S3_ENDPOINT }}
+          S3_REGION: ${{ vars.S3_REGION }}
+          S3_BUCKET: ${{ vars.S3_BUCKET }}
+          S3_ADDRESSING_STYLE: ${{ vars.S3_ADDRESSING_STYLE }}
+          S3_VERSIONING: ${{ vars.S3_VERSIONING }}
+          S3_OBJECT_LOCK: ${{ vars.S3_OBJECT_LOCK }}
+          S3_CONDITIONAL_WRITES: ${{ vars.S3_CONDITIONAL_WRITES }}
+          S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+          S3_SESSION_TOKEN: ${{ secrets.S3_SESSION_TOKEN }}
+        run: mise exec -- .venv/bin/python -I tools/qualify_candidate.py --repo "$RUNNER_TEMP/candidate.git" --revision "$CANDIDATE_SHA"
+      - name: Record qualification on the exact candidate
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QUALIFIED: ${{ steps.qualify.outcome }}
+        run: |
+          python3 - <<'PY'
+          import json,os,re,subprocess
+          revision=os.environ['CANDIDATE_SHA']
+          if not re.fullmatch(r'[0-9a-f]{40}',revision):
+              raise SystemExit('Invalid candidate; no status written')
+          passed=os.environ['QUALIFIED']=='success'
+          body={'state':'success' if passed else 'failure','context':'Verify manuscript assets',
+                'description':'Private bytes and required retention qualified' if passed else 'Private qualification failed',
+                'target_url':os.environ['GITHUB_SERVER_URL']+'/'+os.environ['GITHUB_REPOSITORY']+'/actions/runs/'+os.environ['GITHUB_RUN_ID']}
+          subprocess.run(['gh','api','--method','POST','repos/'+os.environ['GITHUB_REPOSITORY']+'/statuses/'+revision,'--input','-'],
+                         input=json.dumps(body),text=True,check=True,stdout=subprocess.DEVNULL)
+          PY

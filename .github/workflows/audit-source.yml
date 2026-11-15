@@ -23,11 +23,10 @@ jobs:
           version: 2026.11.0
           install: false
       - run: make setup
-      - name: Recheck current assets and every reachable publication
+      - name: Recheck every reachable signed publication
         env:
           PRESS_PUBLISHER_GPG_FINGERPRINTS: ${{ vars.PRESS_PUBLISHER_GPG_FINGERPRINTS }}
           PRESS_PUBLISHER_GPG_PUBLIC_KEYS: ${{ vars.PRESS_PUBLISHER_GPG_PUBLIC_KEYS }}
           PRESS_PUBLISHER_SSH_SIGNERS: ${{ vars.PRESS_PUBLISHER_SSH_SIGNERS }}
         run: |
-          make check-assets
           mise exec -- .venv/bin/python -m guavajam_core.check_publications --all --require-retention
