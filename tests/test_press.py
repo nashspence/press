@@ -52,7 +52,8 @@ class PublisherTests(unittest.TestCase):
             targets = {line.split()[0] for line in result.stdout.splitlines() if line.startswith('  ')}
             self.assertTrue({'asset-credentials', 'image', 'asset-upload', 'asset-pin',
                              'assets-gc', 'asset-retire', 'assets-policy-plan',
-                             'assets-policy-apply', 'gateway-plan', 'gateway-deploy'} <= targets)
+                             'assets-policy-apply', 'gateway-plan', 'gateway-deploy',
+                             'assets-qualify', 'assets-release'} <= targets)
             self.assertEqual(0o600, credentials.stat().st_mode & 0o777)
 
     def test_offline_asset_commands_use_the_callers_repository(self):
@@ -95,6 +96,9 @@ class PublisherTests(unittest.TestCase):
             receipt = json.loads(prepared.stdout)
             self.assertTrue(receipt['assets_verified'])
             self.assertFalse(receipt['retention_verified'])  # This edition has no asset dependencies.
+            self.assertFalse(receipt['public_delivery_verified'])
+            qualified = self.make(repo, 'assets-qualify', 'REV=' + draft, 'WORK=field-notes')
+            self.assertTrue(json.loads(qualified.stdout)['privately_verified'])
             trailers = receipt['publication_trailers']
             self.assertEqual(['Press-Publication: 1', 'Press-Work: works/field-notes/manuscript.md',
                               'Press-Published: 2026-11-13', 'Press-Label: Initial edition'], trailers)
@@ -114,6 +118,30 @@ class PublisherTests(unittest.TestCase):
             self.command(repo, 'git', 'commit', '-S', '-am', 'Changed content', '-m', message)
             changed = self.command(repo, 'git', 'rev-parse', 'HEAD').stdout.strip()
             self.make(repo, 'publication-check', 'REV=' + changed, 'SSH_ALLOWED_SIGNERS=' + str(signers), ok=False)
+
+    def test_trusted_qualification_never_imports_or_executes_candidate_programs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.command(repo, 'git', 'init', '-q', '-b', 'main')
+            self.command(repo, 'git', 'config', 'user.name', 'Example Publisher')
+            self.command(repo, 'git', 'config', 'user.email', 'publisher@example.org')
+            self.command(repo, 'git', 'config', 'commit.gpgsign', 'false')
+            self.make(repo, 'work', 'WORK=field-notes', 'TITLE=Field Notes', 'AUTHOR=Example Author')
+            shadow = repo / 'guavajam_core'
+            shadow.mkdir()
+            (shadow / '__init__.py').write_text('raise RuntimeError("candidate Python executed")')
+            (repo / 'Makefile').write_text('all:\n\tfalse\n')
+            self.command(repo, 'git', 'add', '-A')
+            self.command(repo, 'git', 'commit', '-qm', 'Inert candidate programs')
+            revision = self.command(repo, 'git', 'rev-parse', 'HEAD').stdout.strip()
+            candidate = self.command(repo, sys.executable, '-I', str(ROOT / 'tools/qualify_candidate.py'),
+                                     '--repo', str(repo), '--revision', revision)
+            result = json.loads(candidate.stdout)
+            self.assertEqual(1, result['works'])
+            self.assertTrue(result['privately_verified'])
+            self.assertFalse(result['public_release'])
+            self.command(repo, sys.executable, '-I', str(ROOT / 'tools/qualify_candidate.py'),
+                         '--repo', str(repo), '--revision', '0' * 40, ok=False)
 
     def test_exported_resources_are_from_the_installed_distribution_and_do_not_overwrite(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -144,6 +172,45 @@ class PublisherTests(unittest.TestCase):
                     self.assertIn('--require-retention', check['run'])
                 for key in ['PRESS_PUBLISHER_GPG_FINGERPRINTS', 'PRESS_PUBLISHER_GPG_PUBLIC_KEYS', 'PRESS_PUBLISHER_SSH_SIGNERS']:
                     self.assertEqual('${{ vars.' + key + ' }}', check['env'][key])
+
+    def test_private_qualification_uses_trusted_tooling_and_inert_candidate_objects(self):
+        workflow = yaml.load((ROOT / '.github/workflows/qualify-assets.yml').read_text(), Loader=yaml.BaseLoader)
+        self.assertEqual(['Validate sources'], workflow['on']['workflow_run']['workflows'])
+        self.assertEqual(['completed'], workflow['on']['workflow_run']['types'])
+        self.assertNotIn('pull_request_target', workflow['on'])
+        self.assertEqual('write', workflow['permissions']['statuses'])
+        maintenance = yaml.load((ROOT / '.github/workflows/maintain-assets.yml').read_text(), Loader=yaml.BaseLoader)
+        self.assertEqual(maintenance['concurrency'], workflow['concurrency'])
+        job = workflow['jobs']['qualify']
+        self.assertIn("github.ref == 'refs/heads/main'", job['if'])
+        self.assertIn("workflow_run.conclusion == 'success'", job['if'])
+        self.assertIn('head_repository.full_name == github.repository', job['if'])
+        self.assertEqual('press-assets-readonly', job['environment'])
+        checkouts = [step for step in job['steps'] if step.get('uses', '').startswith('actions/checkout@')]
+        self.assertEqual(1, len(checkouts))
+        self.assertEqual('refs/heads/main', checkouts[0]['with']['ref'])
+        self.assertEqual('tooling', checkouts[0]['with']['path'])
+        self.assertEqual('false', checkouts[0]['with']['persist-credentials'])
+        fetch = next(step for step in job['steps'] if 'git init' in step.get('run', ''))
+        self.assertIn('--bare --initial-branch=main', fetch['run'])
+        self.assertIn('--no-recurse-submodules', fetch['run'])
+        self.assertNotIn('checkout', fetch['run'])
+        qualifier = next(step for step in job['steps'] if step.get('id') == 'qualify')
+        self.assertEqual('tooling', qualifier['working-directory'])
+        self.assertIn('.venv/bin/python -I tools/qualify_candidate.py', qualifier['run'])
+        self.assertIn('--revision "$CANDIDATE_SHA"', qualifier['run'])
+        for step in job['steps']:
+            for name, value in step.get('env', {}).items():
+                if value.startswith('${{ secrets.'):
+                    self.assertIs(step, qualifier)
+                    self.assertIn(name, {'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY', 'S3_SESSION_TOKEN'})
+        status = job['steps'][-1]
+        self.assertEqual('always()', status['if'])
+        self.assertIn("'context':'Verify manuscript assets'", status['run'])
+        self.assertIn("re.fullmatch(r'[0-9a-f]{40}',revision)", status['run'])
+        self.assertIn("'success' if passed else 'failure'", status['run'])
+        audit = (ROOT / '.github/workflows/audit-source.yml').read_text()
+        self.assertNotIn('make check-assets', audit)
 
     def test_asset_maintenance_keeps_publisher_owned_secret_and_retirement_gates(self):
         workflow = yaml.load((ROOT / '.github/workflows/maintain-assets.yml').read_text(), Loader=yaml.BaseLoader)
