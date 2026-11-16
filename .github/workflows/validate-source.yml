@@ -31,10 +31,10 @@ jobs:
 
       - name: Verify incoming publication signatures using independent publisher policy
         env:
-          PRESS_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-          PRESS_PUBLISHER_GPG_FINGERPRINTS: ${{ vars.PRESS_PUBLISHER_GPG_FINGERPRINTS }}
-          PRESS_PUBLISHER_GPG_PUBLIC_KEYS: ${{ vars.PRESS_PUBLISHER_GPG_PUBLIC_KEYS }}
-          PRESS_PUBLISHER_SSH_SIGNERS: ${{ vars.PRESS_PUBLISHER_SSH_SIGNERS }}
+          GUAVAJAM_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          GUAVAJAM_PUBLISHER_GPG_FINGERPRINTS: ${{ vars.GUAVAJAM_PUBLISHER_GPG_FINGERPRINTS }}
+          GUAVAJAM_PUBLISHER_GPG_PUBLIC_KEYS: ${{ vars.GUAVAJAM_PUBLISHER_GPG_PUBLIC_KEYS }}
+          GUAVAJAM_PUBLISHER_SSH_SIGNERS: ${{ vars.GUAVAJAM_PUBLISHER_SSH_SIGNERS }}
         run: mise exec -- .venv/bin/python -m guavajam_core.check_publications --offline
 
       - name: Run executable tests
