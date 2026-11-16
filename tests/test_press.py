@@ -54,7 +54,8 @@ class PublisherTests(unittest.TestCase):
             self.assertTrue({'asset-credentials', 'image', 'asset-upload', 'asset-pin',
                              'assets-gc', 'asset-retire', 'assets-policy-plan',
                              'assets-policy-apply', 'gateway-plan', 'gateway-deploy',
-                             'assets-qualify', 'assets-release', 'preview'} <= targets)
+                             'assets-qualify', 'assets-release', 'preview',
+                             'repository-template', 'catalog-export'} <= targets)
             self.assertEqual(0o600, credentials.stat().st_mode & 0o777)
 
     def test_offline_asset_commands_use_the_callers_repository(self):
@@ -110,8 +111,8 @@ class PublisherTests(unittest.TestCase):
             qualified = self.make(repo, 'assets-qualify', 'REV=' + draft, 'WORK=field-notes')
             self.assertTrue(json.loads(qualified.stdout)['privately_verified'])
             trailers = receipt['publication_trailers']
-            self.assertEqual(['Press-Publication: 1', 'Press-Work: works/field-notes/manuscript.md',
-                              'Press-Published: 2026-11-13', 'Press-Label: Initial edition'], trailers)
+            self.assertEqual(['GuavaJam-Publication: 1', 'GuavaJam-Work: works/field-notes/manuscript.md',
+                              'GuavaJam-Published: 2026-11-13', 'GuavaJam-Label: Initial edition'], trailers)
             key = parent / 'key'
             self.command(repo, 'ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(key))
             self.command(repo, 'git', 'config', 'gpg.format', 'ssh')
@@ -174,9 +175,9 @@ class PublisherTests(unittest.TestCase):
             self.make(ROOT, 'capture', 'OUTPUT=' + str(capture))
             self.assertTrue((capture / 'manifest.json').is_file())
             self.assertTrue((capture / 'capture.mjs').is_file())
-            settings = root / 'press-site.json'
-            self.make(ROOT, 'site-template', 'OUTPUT=' + str(settings))
-            self.assertEqual('press.site.v1', json.loads(settings.read_text())['schema'])
+            settings = root / 'guavajam.json'
+            self.make(ROOT, 'repository-template', 'OUTPUT=' + str(settings))
+            self.assertEqual('guavajam.repository.v1', json.loads(settings.read_text())['schema'])
 
     def test_independent_signer_policy_and_locked_setup_are_in_every_verification_workflow(self):
         for name in ['validate-source', 'audit-source']:
@@ -186,7 +187,7 @@ class PublisherTests(unittest.TestCase):
                 check = next(step for step in job['steps'] if 'guavajam_core.check_publications' in step.get('run', ''))
                 if '--offline' not in check['run']:
                     self.assertIn('--require-retention', check['run'])
-                for key in ['PRESS_PUBLISHER_GPG_FINGERPRINTS', 'PRESS_PUBLISHER_GPG_PUBLIC_KEYS', 'PRESS_PUBLISHER_SSH_SIGNERS']:
+                for key in ['GUAVAJAM_PUBLISHER_GPG_FINGERPRINTS', 'GUAVAJAM_PUBLISHER_GPG_PUBLIC_KEYS', 'GUAVAJAM_PUBLISHER_SSH_SIGNERS']:
                     self.assertEqual('${{ vars.' + key + ' }}', check['env'][key])
 
     def test_private_qualification_uses_trusted_tooling_and_inert_candidate_objects(self):
@@ -242,10 +243,10 @@ class PublisherTests(unittest.TestCase):
         self.assertIn("vars.PRESS_ASSET_MAINTENANCE_ENABLED == 'true'", job['if'])
         self.assertEqual('press-assets', job['environment'])
         operation = next(step for step in job['steps'] if 'OPERATION' in step.get('env', {}))
-        retirement = next(step for step in job['steps'] if 'PRESS_ASSET_RETIRE_TOKEN' in step.get('env', {}))
+        retirement = next(step for step in job['steps'] if 'GUAVAJAM_ASSET_RETIRE_TOKEN' in step.get('env', {}))
         self.assertEqual("inputs.operation != 'retire'", operation['if'])
         self.assertEqual("inputs.operation == 'retire'", retirement['if'])
-        self.assertNotIn('PRESS_ASSET_RETIRE_TOKEN', operation['env'])
+        self.assertNotIn('GUAVAJAM_ASSET_RETIRE_TOKEN', operation['env'])
         from guavajam_core.asset_storage import VARIABLES
         self.assertTrue(VARIABLES.isdisjoint(retirement['env']))
         credentials = {'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY', 'S3_SESSION_TOKEN'}

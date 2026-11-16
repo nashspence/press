@@ -58,7 +58,7 @@ jobs:
         if: inputs.operation == 'retire'
         env:
           GH_TOKEN: ${{ github.token }}
-          PRESS_ASSET_RETIRE_TOKEN: ${{ steps.app-token.outputs.token }}
+          GUAVAJAM_ASSET_RETIRE_TOKEN: ${{ steps.app-token.outputs.token }}
           RETIRE_BRANCH: ${{ inputs.branch }}
           RETIRE_HEAD_SHA: ${{ inputs.head_sha }}
         run: mise exec -- .venv/bin/python -m guavajam_core.asset_workflow retire

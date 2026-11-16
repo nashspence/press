@@ -25,8 +25,8 @@ jobs:
       - run: make setup
       - name: Recheck every reachable signed publication
         env:
-          PRESS_PUBLISHER_GPG_FINGERPRINTS: ${{ vars.PRESS_PUBLISHER_GPG_FINGERPRINTS }}
-          PRESS_PUBLISHER_GPG_PUBLIC_KEYS: ${{ vars.PRESS_PUBLISHER_GPG_PUBLIC_KEYS }}
-          PRESS_PUBLISHER_SSH_SIGNERS: ${{ vars.PRESS_PUBLISHER_SSH_SIGNERS }}
+          GUAVAJAM_PUBLISHER_GPG_FINGERPRINTS: ${{ vars.GUAVAJAM_PUBLISHER_GPG_FINGERPRINTS }}
+          GUAVAJAM_PUBLISHER_GPG_PUBLIC_KEYS: ${{ vars.GUAVAJAM_PUBLISHER_GPG_PUBLIC_KEYS }}
+          GUAVAJAM_PUBLISHER_SSH_SIGNERS: ${{ vars.GUAVAJAM_PUBLISHER_SSH_SIGNERS }}
         run: |
           mise exec -- .venv/bin/python -m guavajam_core.check_publications --all --require-retention
