@@ -22,7 +22,7 @@ wheels = [
 [[package]]
 name = "guavajam-core"
 version = "0.1.0"
-source = { git = "https://github.com/nashspence/guavajam?subdirectory=projects%2Fcore&rev=976d11d0d7060101b6924ebe0d89e0ea19beae4a#976d11d0d7060101b6924ebe0d89e0ea19beae4a" }
+source = { git = "https://github.com/nashspence/guavajam?subdirectory=projects%2Fcore&rev=532f99b1929d10e6b146fc48332057138651c756#532f99b1929d10e6b146fc48332057138651c756" }
 dependencies = [
     { name = "av" },
     { name = "pillow" },
@@ -60,7 +60,7 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "guavajam-core", git = "https://github.com/nashspence/guavajam?subdirectory=projects%2Fcore&rev=976d11d0d7060101b6924ebe0d89e0ea19beae4a" }]
+requires-dist = [{ name = "guavajam-core", git = "https://github.com/nashspence/guavajam?subdirectory=projects%2Fcore&rev=532f99b1929d10e6b146fc48332057138651c756" }]
 
 [[package]]
 name = "pyyaml"

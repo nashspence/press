@@ -8,4 +8,4 @@ dependencies = ["guavajam-core==0.1.0"]
 package = false
 
 [tool.uv.sources]
-guavajam-core = { git = "https://github.com/nashspence/guavajam", rev = "976d11d0d7060101b6924ebe0d89e0ea19beae4a", subdirectory = "projects/core" }
+guavajam-core = { git = "https://github.com/nashspence/guavajam", rev = "532f99b1929d10e6b146fc48332057138651c756", subdirectory = "projects/core" }
