@@ -41,6 +41,7 @@ class PublisherTests(unittest.TestCase):
         self.assertEqual(source['rev'], direct['vcs_info']['commit_id'])
         self.assertEqual('projects/core', direct['subdirectory'])
         self.assertIsNone(importlib.util.find_spec('guavajam'))
+        self.assertIsNotNone(importlib.util.find_spec('guavajam_core.preview_docker'))
 
     def test_setup_then_help_and_asset_commands_work_in_one_parallel_invocation(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -53,7 +54,7 @@ class PublisherTests(unittest.TestCase):
             self.assertTrue({'asset-credentials', 'image', 'asset-upload', 'asset-pin',
                              'assets-gc', 'asset-retire', 'assets-policy-plan',
                              'assets-policy-apply', 'gateway-plan', 'gateway-deploy',
-                             'assets-qualify', 'assets-release'} <= targets)
+                             'assets-qualify', 'assets-release', 'preview'} <= targets)
             self.assertEqual(0o600, credentials.stat().st_mode & 0o777)
 
     def test_offline_asset_commands_use_the_callers_repository(self):
