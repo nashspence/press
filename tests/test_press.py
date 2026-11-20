@@ -43,6 +43,37 @@ class PublisherTests(unittest.TestCase):
         self.assertIsNone(importlib.util.find_spec('guavajam'))
         self.assertIsNotNone(importlib.util.find_spec('guavajam_core.preview_docker'))
 
+    def test_make_help_works_before_setup(self):
+        output = []
+        for goals in ((), ('help',)):
+            with self.subTest(goals=goals), tempfile.TemporaryDirectory() as directory:
+                repo = Path(directory)
+                (repo / 'Makefile').write_bytes((ROOT / 'Makefile').read_bytes())
+                tools = repo / 'bin'
+                tools.mkdir()
+                invocations = repo / 'tool-invocations'
+                for tool in ('mise', 'uv'):
+                    sentinel = tools / tool
+                    sentinel.write_text(
+                        '#!/bin/sh\nprintf "%s\\n" "${0##*/}" >> "$TOOL_INVOCATIONS"\nexit 1\n',
+                        encoding='utf-8')
+                    sentinel.chmod(0o755)
+                env = {
+                    'PATH': str(tools) + os.pathsep + os.defpath,
+                    'HOME': str(repo),
+                    'LC_ALL': 'C',
+                    'TOOL_INVOCATIONS': str(invocations),
+                }
+                result = subprocess.run(('make', *goals), cwd=repo, env=env, text=True,
+                                        capture_output=True, timeout=10)
+                self.assertFalse(invocations.exists(), 'fresh help invoked mise or uv')
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertIn('Usage:', result.stdout)
+                self.assertIn('Run make setup', result.stdout)
+                output.append(result.stdout)
+        self.assertEqual(2, len(output))
+        self.assertEqual(output[0], output[1])
+
     def test_setup_then_help_and_asset_commands_work_in_one_parallel_invocation(self):
         with tempfile.TemporaryDirectory() as directory:
             credentials = Path(directory) / 'credentials.example'
